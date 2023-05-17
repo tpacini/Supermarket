@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pthread.h>
+#include <stdbool.h>
 
 
 /* Director's variables */
@@ -12,6 +13,9 @@ long* nCustomers;                // N. of customers per cashier
 pthread_cond_t exitCustomers;
 pthread_mutex_t gateCustomers;
 bool gateClosed;
+
+
+
 
 /* aaa */
 long K, C, E, T, P;
