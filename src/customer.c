@@ -6,7 +6,16 @@
 #include "glob.h"
 #include "cashier.h"
 #include "customer.h"
+#include "director.h"
 
+void free_cu(Customer_t* cu)
+{
+    pthread_cond_destroy(&cu->finishedTurn);
+    pthread_cond_destroy(&cu->startTurn);
+    pthread_mutex_destroy(&cu->mutexC);
+
+    free(cu);
+}
 
 struct timespec diff(struct timespec start, struct timespec end)
 {
@@ -25,11 +34,13 @@ struct timespec diff(struct timespec start, struct timespec end)
     return temp;
 }
 
-void chooseCashier (Cashier* c)
+int chooseCashier (Cashier_t* c)
 {
     int i = 0;
+    Cashier_t* pastCa = c;
 
-    if (c == NULL)
+    pthread_mutex_lock(&c->accessQueue);
+    if (c == NULL || c->queueCustomers == NULL)
     {
         c = &(cashiers[0]);
         i = 1;
@@ -46,21 +57,42 @@ void chooseCashier (Cashier* c)
             }
         }
     }
+    pthread_mutex_lock(&c->accessQueue);
+
+    if (c != pastCa)
+    {
+        pastCa = NULL;
+        return 1;
+    }
+    
+    pastCa = NULL;
+    return 0;
 }
 
 void* CustomerP()
 {
-    struct timespec t, ts_start, ts_end, ts_queue;
+    struct timespec t, ts_start, ts_end, ts_queue, ts_checkline;
     FILE* fp;
-    char* logMsg;        // information for log file
-    Cashier* ca;         // current cashier
-    Customer* cu;             // customer data
-    bool skipC = false;  // flag: try another cashier
+    char* logMsg;               // information for log file
+    Cashier_t* ca;              // current cashier
+    bool skipCashier = false;   // flag: try another cashier
 
+    unsigned int ret;
+    unsigned int nQueue = 0, timeInside, timeQueue;
+    unsigned int timeToBuy = rand() % (T - 10 + 1) + 10;
+    unsigned int nProd = rand() % (P - 0 + 1);
 
-    unsigned int nQueue, timeInside, timeQueue;
-    unsigned int timeToBuy = rand() % (T - 10 + 1) + 10; 
-    unsigned int nProd     = rand() % (P - 0 + 1);
+    Customer_t* cu = (Customer_t*) malloc(sizeof(Customer_t));
+    if (cu == NULL)
+    {
+        perror("malloc");
+        exit(errno);
+    }
+    pthread_cond_init(&cu->finishedTurn, NULL);
+    pthread_cond_init(&cu->startTurn, NULL);
+    pthread_mutex_init(&cu->mutexC, NULL);
+    cu->productProcessed = false;
+    cu->yourTurn = false;
 
 
     // Time spent inside the supermarket
@@ -81,37 +113,52 @@ void* CustomerP()
 
     // Choose cashier, periodically check for a line with less customers
     clock_gettime(CLOCK_MONOTONIC, &ts_start);
-    while (!skipC) 
+    while (!skipCashier) 
     {
-        chooseCashier(ca);
+        ret = chooseCashier(ca);
 
-        pthread_mutex_lock(&ca->accessQueue);
-        if (ca->queueCustomers == NULL) 
+        if (ret == 1) 
         {
-            skipC = true;
+            nQueue += 1;
+            pthread_mutex_lock(&ca->accessQueue);
+            if (ca->queueCustomers == NULL)
+            {
+                skipCashier = true;
+            }
+
+            if (push(ca->queueCustomers, cu) == -1)
+            {
+                perror("push");
+                skipCashier = true;
+            }
+            pthread_mutex_unlock(&ca->accessQueue);
         }
-
-        if (push(ca->queueCustomers, cu) == -1)
+        
+        if (skipCashier)
         {
-            perror("push");
-            skipC = true;
-        }
-        pthread_mutex_unlock(&ca->accessQueue);
-
-        if (skipC)
-        {
-            skipC = false;
+            nQueue -= 1;
+            skipCashier = false;
             continue;
         }
             
         // Wait your turn and after some time check new line
-        // TODO: implement check of other lines every S milliseconds
         pthread_mutex_lock(&cu->mutexC); 
-        while(!cu->yourTurn)
-            pthread_cond_wait(&cu->startTurn, &cu->mutexC);
+        clock_gettime(CLOCK_MONOTONIC, &ts_checkline);
+        ts_checkline.tv_nsec += S;
+        ret = 0;
+        while(!cu->yourTurn && ret != ETIMEDOUT)
+            pthread_cond_timedwait(&cu->startTurn, &cu->mutexC, &ts_checkline);
 
-        cu->yourTurn = false;
+        if (cu->yourTurn)
+        {
+            cu->yourTurn = false;
+            ret = 0;
+        }
         pthread_mutex_unlock(&cu->mutexC);
+
+        // It is not your turn yet, you'll check new lines
+        if (ret == ETIMEDOUT)
+            continue;
 
         // The cashier is processing your products 
         pthread_mutex_lock(&cu->mutexC);
@@ -125,27 +172,34 @@ void* CustomerP()
     clock_gettime(CLOCK_MONOTONIC, &ts_end);
     ts_queue = diff(ts_start, ts_end);
 
-
-
     // Write into log file
     timeQueue = ts_queue.tv_sec / 1000 + ts_queue.tv_nsec * 100000; // to ms
     timeInside = timeToBuy + timeQueue;
 
-    logMsg = (char*) malloc(sizeof(char));
-    sprintf(logMsg, "");
+    logMsg = (char*) malloc((10*4+3+1)*sizeof(char));
+    if (logMsg == NULL)
+    {
+        perror("malloc");
+        free_cu(cu);
+        exit(errno);
+    }
+    sprintf(logMsg, "%10u %10u %10u %10u", timeInside, timeQueue, nQueue, nProd);
 
     pthread_mutex_lock(&logAccess);
     fp = fopen("../log.txt", "a");
     if (fp == NULL)
     {
         perror("fopen");
+        free_cu(cu);
+        free(logMsg);
         exit(errno);
     }
     fwrite(logMsg, sizeof(char), len(logMsg), fp);
     fclose(fp);
     pthread_mutex_unlock(&logAccess);
 
+    // Zero pointers and free allocated memory
+    ca = NULL;
+    free_cu(cu);
     free(logMsg);
-
-
 }

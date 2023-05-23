@@ -1,3 +1,7 @@
+#include "cashier.h"
+#include <pthread.h>
+#include <stdbool.h>
+
 /* The director:
     - opens or closes registers (based on cashier's information)
         - the cashier periodically reports to the director the number of customers in the queue 
@@ -14,6 +18,12 @@
 
 #pragma once
 
+/* Variables to handle customers with no products */
+pthread_cond_t exitCustomers;
+pthread_mutex_t gateCustomers;
+bool gateClosed;
+
+Cashier_t *cashiers; // list of all the cashiers
 
 void Director()
 {

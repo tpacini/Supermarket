@@ -4,9 +4,9 @@
 #pragma once
 
 typedef struct cashier {
-    /* Check or modify queue */
     BQueue_t* queueCustomers;
     pthread_mutex_t accessQueue;
-} Cashier;
+} Cashier_t;
 
-Cashier* cashiers; // list of all the cashiers
+
+void CashierP();

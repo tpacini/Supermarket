@@ -68,12 +68,6 @@ int main(int argc, char *argv[])
     }
 
 
-    nCustomers = (long*) malloc(K*sizeof(long));
-    if (nCustomers == NULL)
-    {
-        perror("malloc");
-        exit(errno);
-    }
 
     // Start Director
     
