@@ -12,6 +12,9 @@ typedef struct customer {
 /* Customer routine executed by a thread. */
 void* CustomerP();
 
+/* Free all the object inside the customer's data structure */
+void free_cu(Customer_t* cu);
+
 /* Perform the difference between two timespec elements */
 struct timespec diff(struct timespec start, struct timespec end);
 

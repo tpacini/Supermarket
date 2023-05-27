@@ -10,9 +10,12 @@
 
 void free_cu(Customer_t* cu)
 {
-    pthread_cond_destroy(&cu->finishedTurn);
-    pthread_cond_destroy(&cu->startTurn);
-    pthread_mutex_destroy(&cu->mutexC);
+    if (&cu->finishedTurn)
+        pthread_cond_destroy(&cu->finishedTurn);
+    if (&cu->startTurn)
+        pthread_cond_destroy(&cu->startTurn);
+    if (&cu->mutexC)
+        pthread_mutex_destroy(&cu->mutexC);
 
     free(cu);
 }
@@ -86,11 +89,23 @@ void* CustomerP()
     if (cu == NULL)
     {
         perror("malloc");
-        exit(errno);
+        goto error;
     }
-    pthread_cond_init(&cu->finishedTurn, NULL);
-    pthread_cond_init(&cu->startTurn, NULL);
-    pthread_mutex_init(&cu->mutexC, NULL);
+    if (pthread_cond_init(&cu->finishedTurn, NULL) != 0)
+    {
+        perror("pthread_cond_init");
+        goto error;
+    }
+    if (pthread_cond_init(&cu->startTurn, NULL) != 0)
+    {
+        perror("pthread_cond_init");
+        goto error;
+    }
+    if (pthread_mutex_init(&cu->mutexC, NULL) != 0)
+    {
+        perror("pthread_mutex_init");
+        goto error;
+    }
     cu->productProcessed = false;
     cu->yourTurn = false;
 
@@ -180,8 +195,7 @@ void* CustomerP()
     if (logMsg == NULL)
     {
         perror("malloc");
-        free_cu(cu);
-        exit(errno);
+        goto error;
     }
     sprintf(logMsg, "%10u %10u %10u %10u", timeInside, timeQueue, nQueue, nProd);
 
@@ -190,16 +204,16 @@ void* CustomerP()
     if (fp == NULL)
     {
         perror("fopen");
-        free_cu(cu);
-        free(logMsg);
-        exit(errno);
+        goto error;
     }
     fwrite(logMsg, sizeof(char), len(logMsg), fp);
     fclose(fp);
     pthread_mutex_unlock(&logAccess);
 
-    // Zero pointers and free allocated memory
+error:
     ca = NULL;
-    free_cu(cu);
-    free(logMsg);
+    if (cu != NULL)
+        free_cu(cu);
+    if (logMsg != NULL)
+        free(logMsg);
 }
