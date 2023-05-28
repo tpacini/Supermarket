@@ -6,7 +6,7 @@ typedef struct customer {
     pthread_mutex_t mutexC;
     bool productProcessed;
     bool yourTurn;
-
+    unsigned int nProd;
 } Customer_t;
 
 /* Customer routine executed by a thread. */

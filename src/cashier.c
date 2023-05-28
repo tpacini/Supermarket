@@ -2,9 +2,11 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <stdlib.h>
 #include "cashier.h"
 #include "glob.h"
+#include "customer.h"
 
 #define MAX_LINE 50
 #define PROD_THRESH 1000
@@ -24,6 +26,9 @@ unsigned int convert(char *st)
 void CashierP()
 {
     unsigned char *buf, *tok;
+    unsigned int nProd;
+    struct timespec pTime;
+    Customer_t* cu;
     FILE *fp;
 
     unsigned int procTime = rand() % (80 - 20 + 1) + 20;   // processing time
@@ -132,12 +137,33 @@ void CashierP()
     pthread_mutex_unlock(&configAccess);
 
     // Start handling customers
+    while(1) // TODO: ca->open  
+    {
+        pthread_mutex_lock(&ca->accessQueue);
+        cu = pop(ca->queueCustomers);
+        pthread_mutex_unlock(&ca->accessQueue);
+
+        // Wake up customer
+        pthread_mutex_lock(&cu->mutexC);
+        nProd = cu->nProd;
+        cu->yourTurn = true;
+        pthread_cond_signal(&cu->startTurn);
+        pthread_mutex_unlock(&cu->mutexC);
+
+        // Process products (fixed time of cashier + linear time for product)
+        pTime.tv_nsec = ((procTime+nProd*timeProd) % 1000) * 1000000;
+        pTime.tv_sec = (procTime + nProd * timeProd) / 1000;
+        nanosleep(&pTime, NULL);
+        
+        // Notify customer
+        pthread_mutex_lock(&cu->mutexC);
+        cu->productProcessed = true;
+        pthread_cond_signal(&cu->finishedTurn);
+        pthread_mutex_unlock(&cu->mutexC);
+    }
 
 
-    // Periodically notify director
-
-    // TODO: FINISH CASHIER
-    
+    // TODO: Periodically notify director
     // Nel loop del cassiere prima di servire un altro cliente, il cassiere controlla se il direttore ha chiuso la cassa
 
 error:

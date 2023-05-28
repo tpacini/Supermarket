@@ -83,7 +83,6 @@ void* CustomerP()
     unsigned int ret;
     unsigned int nQueue = 0, timeInside, timeQueue;
     unsigned int timeToBuy = rand() % (T - 10 + 1) + 10;
-    unsigned int nProd = rand() % (P - 0 + 1);
 
     Customer_t* cu = (Customer_t*) malloc(sizeof(Customer_t));
     if (cu == NULL)
@@ -108,7 +107,7 @@ void* CustomerP()
     }
     cu->productProcessed = false;
     cu->yourTurn = false;
-
+    cu->nProd = rand() % (P - 0 + 1);
 
     // Time spent inside the supermarket
     t.tv_nsec = (timeToBuy % 1000) * 1000000;
@@ -116,7 +115,7 @@ void* CustomerP()
     nanosleep(&t, NULL);
 
     // Did you have zero product? Notify director
-    if (nProd == 0)
+    if (cu->nProd == 0)
     {
         pthread_mutex_lock(&gateCustomers);
         while (gateClosed)
@@ -197,7 +196,7 @@ void* CustomerP()
         perror("malloc");
         goto error;
     }
-    sprintf(logMsg, "%10u %10u %10u %10u", timeInside, timeQueue, nQueue, nProd);
+    sprintf(logMsg, "%10u %10u %10u %10u", timeInside, timeQueue, nQueue, cu->nProd);
 
     pthread_mutex_lock(&logAccess);
     fp = fopen("../log.txt", "a");
