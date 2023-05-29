@@ -15,9 +15,6 @@ void* CustomerP();
 /* Free all the object inside the customer's data structure */
 void free_cu(Customer_t* cu);
 
-/* Perform the difference between two timespec elements */
-struct timespec diff(struct timespec start, struct timespec end);
-
 /* Loop through all the open cashiers and pick the line with less customers,
  * if the choosen cashier is equal to the given one, the function returns 0,
  * 1 otherwise.

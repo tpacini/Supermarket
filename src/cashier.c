@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 199309L
+
 #include <pthread.h>
 #include <errno.h>
 #include <stdio.h>
@@ -10,46 +12,39 @@
 
 #define MAX_LINE 50
 #define PROD_THRESH 1000
-#define NOTIFY_TRESH 5000
 
-unsigned int convert(char *st)
+bool is_open (Cashier_t* ca)
 {
-    char *x;
-    for (x = st; *x; x++)
-    {
-        if (!isdigit(*x))
-            return NULL;
-    }
-    return (strtoul(st, NULL, 10));
+    bool result = false;
+
+    pthread_mutex_lock(&ca->accessState);
+    if (ca->open)
+        result = true;
+    pthread_mutex_unlock(&ca->accessState);
+    
+    return result;
 }
 
-void CashierP()
+void CashierP(Cashier_t* ca)
 {
     unsigned char *buf, *tok;
     unsigned int nProd;
-    struct timespec pTime;
+    unsigned int totNProd = 0, totNCust = 0;
+    struct timespec ts_pTime, ts_start, ts_end, ts_tot;
     Customer_t* cu;
     FILE *fp;
 
     unsigned int procTime = rand() % (80 - 20 + 1) + 20;   // processing time
     unsigned int timeProd = 0;                             // time to process single product
-    unsigned int timeNotify = 1000;                        // delay to notify director
+    
+    struct timespec ts_sTime;
+    ts_sTime.tv_sec = 0;
+    ts_sTime.tv_nsec = 0;
 
-    Cashier_t* ca = (Cashier_t*) malloc(sizeof(Cashier_t));
-    if (ca == NULL)
-    {
-        perror("malloc");
-        goto error;
-    }
-    if (pthread_mutex_init(&ca->accessQueue, NULL) != 0)
-    {
-        perror("pthread_mutex_init");
-        goto error;
-    }
-    // If all customers inside the supermarket are in this line
-    ca->queueCustomers = initBQueue(C);
+    // Set time of opening
+    clock_gettime(CLOCK_MONOTONIC, &ts_start);
 
-    // Retrieve parameters from configuration file
+    // Retrieve parameter from configuration file
     pthread_mutex_lock(&configAccess);
     fp = fopen('lib/config.txt', 'r');
     if (fp == NULL)
@@ -99,45 +94,12 @@ void CashierP()
         
     }
 
-    memset(buf, 0, strlen(buf));
-
-    if (fseek(fp, 1L, SEEK_SET) == -1)
-    {
-        perror("fseek");
-        thread_mutex_unlock(&configAccess);
-        goto error;
-    }
-    if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
-    {
-        perror("fseek");
-        thread_mutex_unlock(&configAccess);
-        goto error;
-    }
-    tok = strtok(buf, " ");
-    while (tok != NULL)
-    {
-        // Next element is timeNotify
-        if (strcmp(tok, ":") == 0)
-        {
-            tok = strtok(NULL, " ");
-            timeNotify = convert(tok);
-            if (timeNotify > NOTIFY_TRESH)
-            {
-                perror("Delay to notify director too large");
-                thread_mutex_unlock(&configAccess);
-                goto error;
-            }
-        }
-        else
-            tok = strtok(NULL, " ");
-    }
-
     free(buf);
     fclose(fp);
     pthread_mutex_unlock(&configAccess);
 
     // Start handling customers
-    while(1) // TODO: ca->open  
+    while(is_open(ca))   
     {
         pthread_mutex_lock(&ca->accessQueue);
         cu = pop(ca->queueCustomers);
@@ -151,20 +113,35 @@ void CashierP()
         pthread_mutex_unlock(&cu->mutexC);
 
         // Process products (fixed time of cashier + linear time for product)
-        pTime.tv_nsec = ((procTime+nProd*timeProd) % 1000) * 1000000;
-        pTime.tv_sec = (procTime + nProd * timeProd) / 1000;
-        nanosleep(&pTime, NULL);
+        ts_pTime = ms_to_timespec(procTime + nProd * timeProd);
+        nanosleep(&ts_pTime, NULL);
         
         // Notify customer
         pthread_mutex_lock(&cu->mutexC);
         cu->productProcessed = true;
         pthread_cond_signal(&cu->finishedTurn);
         pthread_mutex_unlock(&cu->mutexC);
+
+        ts_sTime = add_ts(ts_pTime, ts_sTime);
+        totNCust += 1;
+        totNProd += nProd;
     }
 
+    // Set closing time
+    clock_gettime(CLOCK_MONOTONIC, &ts_end);
 
-    // TODO: Periodically notify director
-    // Nel loop del cassiere prima di servire un altro cliente, il cassiere controlla se il direttore ha chiuso la cassa
+    // Retrieve the time cashier has been opened
+    ts_tot = diff(ts_start, ts_end);
+
+    // Save information of current service
+    pthread_mutex_lock(&ca->accessLogInfo);
+    ca->meanServiceTime = mean_ts(add_ts(ts_sTime, ca->meanServiceTime) \
+                            , totNCust);
+    ca->timeOpen = add_ts(ts_tot, ca->timeOpen);
+    ca->nCustomer += totNCust;
+    ca->nProds += totNProd;
+    ca->nClose += 1;
+    pthread_mutex_unlock(&ca->accessLogInfo);
 
 error:
     if (ca->queueCustomers != NULL)
