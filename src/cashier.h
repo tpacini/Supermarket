@@ -18,9 +18,8 @@ typedef struct cashier {
     pthread_mutex_t accessLogInfo;
 } Cashier_t;
 
-
+/* Cashier routine executed by a thread */
 void CashierP(Cashier_t* ca);
 
+/* Check if the director shutdown the cashier */
 bool is_open(Cashier_t* ca);
-
-int cashier_init(Cashier_t* ca);

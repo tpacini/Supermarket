@@ -1,17 +1,18 @@
 #define _POSIX_C_SOURCE 199309L
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <pthread.h>
 #include <errno.h>
-#include <stdio.h>
-#include <string.h>
 #include <time.h>
-#include <stdlib.h>
+
 #include "cashier.h"
 #include "glob.h"
 #include "customer.h"
 
 #define MAX_LINE 50
 #define PROD_THRESH 1000
+#define NOTIFY_TRESH 5000
 
 bool is_open (Cashier_t* ca)
 {
@@ -30,8 +31,9 @@ void CashierP(Cashier_t* ca)
     unsigned char *buf, *tok;
     unsigned int nProd;
     unsigned int totNProd = 0, totNCust = 0;
-    struct timespec ts_pTime, ts_start, ts_end, ts_tot;
-    Customer_t* cu;
+    struct timespec ts_pTime, ts_tot;
+    struct timespec ts_start, ts_end;
+    Customer_t *cu;
     FILE *fp;
 
     unsigned int procTime = rand() % (80 - 20 + 1) + 20;   // processing time
@@ -144,14 +146,10 @@ void CashierP(Cashier_t* ca)
     pthread_mutex_unlock(&ca->accessLogInfo);
 
 error:
-    if (ca->queueCustomers != NULL)
-        deleteBQueue(ca->queueCustomers, NULL);
-    if (ca != NULL)
-        free(ca);
+    cu = NULL;
+
     if (buf != NULL)
         free(buf);
     if (ftell(fp) >= 0)
         fclose(fp);
-
-
 }

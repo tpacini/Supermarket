@@ -25,10 +25,9 @@ bool gateClosed;
 
 Cashier_t *cashiers; // list of all the cashiers
 
-void Director()
-{
+void DirectorP();
 
-}
-
+/**/
+int cashier_init(Cashier_t *ca);
 
 long to_long(char* to_convert);
