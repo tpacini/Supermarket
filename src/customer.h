@@ -6,14 +6,14 @@ typedef struct customer {
     pthread_mutex_t mutexC;
     bool productProcessed;
     bool yourTurn;
-
+    unsigned int nProd;
 } Customer_t;
 
 /* Customer routine executed by a thread. */
 void* CustomerP();
 
-/* Perform the difference between two timespec elements */
-struct timespec diff(struct timespec start, struct timespec end);
+/* Free all the object inside the customer's data structure */
+void free_cu(Customer_t* cu);
 
 /* Loop through all the open cashiers and pick the line with less customers,
  * if the choosen cashier is equal to the given one, the function returns 0,

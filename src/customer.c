@@ -10,28 +10,14 @@
 
 void free_cu(Customer_t* cu)
 {
-    pthread_cond_destroy(&cu->finishedTurn);
-    pthread_cond_destroy(&cu->startTurn);
-    pthread_mutex_destroy(&cu->mutexC);
+    if (&cu->finishedTurn)
+        pthread_cond_destroy(&cu->finishedTurn);
+    if (&cu->startTurn)
+        pthread_cond_destroy(&cu->startTurn);
+    if (&cu->mutexC)
+        pthread_mutex_destroy(&cu->mutexC);
 
     free(cu);
-}
-
-struct timespec diff(struct timespec start, struct timespec end)
-{
-    struct timespec temp;
-
-    if ((end.tv_nsec - start.tv_nsec) < 0)
-    {
-        temp.tv_sec = end.tv_sec - start.tv_sec - 1;
-        temp.tv_nsec = 1000000000 + end.tv_nsec - start.tv_nsec;
-    }
-    else
-    {
-        temp.tv_sec = end.tv_sec - start.tv_sec;
-        temp.tv_nsec = end.tv_nsec - start.tv_nsec;
-    }
-    return temp;
 }
 
 int chooseCashier (Cashier_t* c)
@@ -80,20 +66,32 @@ void* CustomerP()
     unsigned int ret;
     unsigned int nQueue = 0, timeInside, timeQueue;
     unsigned int timeToBuy = rand() % (T - 10 + 1) + 10;
-    unsigned int nProd = rand() % (P - 0 + 1);
 
     Customer_t* cu = (Customer_t*) malloc(sizeof(Customer_t));
+    // TODO: cu_init(cu); 
     if (cu == NULL)
     {
         perror("malloc");
-        exit(errno);
+        goto error;
     }
-    pthread_cond_init(&cu->finishedTurn, NULL);
-    pthread_cond_init(&cu->startTurn, NULL);
-    pthread_mutex_init(&cu->mutexC, NULL);
+    if (pthread_cond_init(&cu->finishedTurn, NULL) != 0)
+    {
+        perror("pthread_cond_init");
+        goto error;
+    }
+    if (pthread_cond_init(&cu->startTurn, NULL) != 0)
+    {
+        perror("pthread_cond_init");
+        goto error;
+    }
+    if (pthread_mutex_init(&cu->mutexC, NULL) != 0)
+    {
+        perror("pthread_mutex_init");
+        goto error;
+    }
     cu->productProcessed = false;
     cu->yourTurn = false;
-
+    cu->nProd = rand() % (P - 0 + 1);
 
     // Time spent inside the supermarket
     t.tv_nsec = (timeToBuy % 1000) * 1000000;
@@ -101,7 +99,7 @@ void* CustomerP()
     nanosleep(&t, NULL);
 
     // Did you have zero product? Notify director
-    if (nProd == 0)
+    if (cu->nProd == 0)
     {
         pthread_mutex_lock(&gateCustomers);
         while (gateClosed)
@@ -180,26 +178,25 @@ void* CustomerP()
     if (logMsg == NULL)
     {
         perror("malloc");
-        free_cu(cu);
-        exit(errno);
+        goto error;
     }
-    sprintf(logMsg, "%10u %10u %10u %10u", timeInside, timeQueue, nQueue, nProd);
+    sprintf(logMsg, "%10u %10u %10u %10u", timeInside, timeQueue, nQueue, cu->nProd);
 
     pthread_mutex_lock(&logAccess);
     fp = fopen("../log.txt", "a");
     if (fp == NULL)
     {
         perror("fopen");
-        free_cu(cu);
-        free(logMsg);
-        exit(errno);
+        goto error;
     }
     fwrite(logMsg, sizeof(char), len(logMsg), fp);
     fclose(fp);
     pthread_mutex_unlock(&logAccess);
 
-    // Zero pointers and free allocated memory
+error:
     ca = NULL;
-    free_cu(cu);
-    free(logMsg);
+    if (cu != NULL)
+        free_cu(cu);
+    if (logMsg != NULL)
+        free(logMsg);
 }
