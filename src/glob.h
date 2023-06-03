@@ -4,6 +4,8 @@
 
 #pragma once
 
+#define MAX_LINE 50
+
 /* Global variables */
 long K, C, E, T, P, S;
 
@@ -14,6 +16,7 @@ pthread_mutex_t logAccess;
 pthread_mutex_t configAccess;
 
 
+unsigned char* config_filename; 
 
 unsigned int convert(char *st);
 

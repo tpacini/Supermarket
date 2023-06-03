@@ -3,6 +3,8 @@
 #include <time.h>
 #include "glob.h"
 
+unsigned char* global_filename = 'lib/config.txt';
+
 unsigned int convert(char *st)
 {
     char *x;

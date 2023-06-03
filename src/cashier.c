@@ -5,14 +5,11 @@
 #include <pthread.h>
 #include <errno.h>
 #include <time.h>
+#include <string.h>
 
 #include "cashier.h"
 #include "glob.h"
 #include "customer.h"
-
-#define MAX_LINE 50
-#define PROD_THRESH 1000
-#define NOTIFY_TRESH 5000
 
 bool is_open (Cashier_t* ca)
 {
@@ -48,7 +45,7 @@ void CashierP(Cashier_t* ca)
 
     // Retrieve parameter from configuration file
     pthread_mutex_lock(&configAccess);
-    fp = fopen('lib/config.txt', 'r');
+    fp = fopen(config_filename, 'r');
     if (fp == NULL)
     {
         perror("fopen");
@@ -72,10 +69,12 @@ void CashierP(Cashier_t* ca)
     }
     if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
     {
-        perror("fseek");
+        perror("fread");
         thread_mutex_unlock(&configAccess);
         goto error;
     }
+    fclose(fp);
+    
     tok = strtok(buf, " ");
     while (tok != NULL)
     {
@@ -97,7 +96,6 @@ void CashierP(Cashier_t* ca)
     }
 
     free(buf);
-    fclose(fp);
     pthread_mutex_unlock(&configAccess);
 
     // Start handling customers

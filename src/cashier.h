@@ -4,6 +4,9 @@
 
 #pragma once
 
+#define PROD_THRESH 1000
+#define NOTIFY_TRESH 5000
+
 typedef struct cashier {
     int id;
     BQueue_t* queueCustomers;

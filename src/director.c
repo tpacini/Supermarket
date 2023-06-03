@@ -87,63 +87,26 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    // Create a daemon which update the number of customers waiting
-    // in line for every cashier, periodically (Access the array of
-    // cashiers)
+    
+    
+    
     // pthread_create(&thNotifier, NULL, Notifier, NULL)
 
 
-    // Allocate Cashiers
-    // Free cashiers before leaving
+    
 
-    // Define array of cashiers
+    /*int sigrecv;
+     sigset_t set;
 
-    /*
-    Cashier_t* ca = (Cashier_t*) malloc(sizeof(Cashier_t));
-    if (ca == NULL)
-    {
-        perror("malloc");
-        goto error;
-    }
-    if (cashier_init(ca) != 0)
-    {
-        perror("cashier_init");
-        goto error;
-    }
-    */
+     sigemptyset(&set);
+     sigaddset(&set, SIGQUIT);
+     sigaddset(&set, SIGHUP);
+     pthread_sigmask(SIG_SETMASK, &set, NULL);
 
-    /* Take timeNotify
-    if (fseek(fp, 1L, SEEK_SET) == -1)
-    {
-        perror("fseek");
-        thread_mutex_unlock(&configAccess);
-        goto error;
-    }
-    if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
-    {
-        perror("fseek");
-        thread_mutex_unlock(&configAccess);
-        goto error;
-    }
-    tok = strtok(buf, " ");
-    while (tok != NULL)
-    {
-        // Next element is timeNotify
-        if (strcmp(tok, ":") == 0)
-        {
-            tok = strtok(NULL, " ");
-            timeNotify = convert(tok);
-            if (timeNotify > NOTIFY_TRESH)
-            {
-                perror("Delay to notify director too large");
-                thread_mutex_unlock(&configAccess);
-                goto error;
-            }
-        }
-        else
-            tok = strtok(NULL, " ");
-    }
-    */
+     CHECK_EQ(sigwait(&set, &sigrecv), -1, sigwait);*/
+
+
+
 
     // Start Director
     
