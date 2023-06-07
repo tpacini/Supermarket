@@ -23,11 +23,8 @@ pthread_cond_t exitCustomers;
 pthread_mutex_t gateCustomers;
 bool gateClosed;
 
-Cashier_t *cashiers; // list of all the cashiers
 
 void DirectorP();
 
-/**/
-int cashier_init(Cashier_t *ca);
 
 long to_long(char* to_convert);

@@ -1,30 +1,13 @@
+#define _POSIX_C_SOURCE 200112L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <signal.h>
+#include <unistd.h>
+#include <sys/socket.h>
+
 #include "glob.h"
-#include "cashier.h"
-
-int cashier_init(Cashier_t *ca)
-{
-    bool open = true;
-
-    // If all customers inside the supermarket are in this line
-    // --> length = C
-    if ((ca->queueCustomers = initBQueue(C)) == NULL)
-    {
-        perror("initBQueue");
-        return -1;
-    }
-
-    if (pthread_mutex_init(&ca->accessQueue, NULL) != 0 ||
-        pthread_mutex_init(&ca->accessState, NULL) != 0)
-    {
-        perror("pthread_mutex_init");
-        return -1;
-    }
-
-    return 0;
-}
 
 long to_long(char* to_convert)
 {
@@ -56,62 +39,107 @@ long to_long(char* to_convert)
 
 int main(int argc, char *argv[])
 {
-    //pthread_mutex_t gateCustomers = PTHREAD_MUTEX_INITIALIZER;
-    //pthread_cond_t exitCustomers = PTHREAD_COND_INITIALIZER;
+    int sfd, csfd, optval, sigrecv = 0;
+    char msg [2];
+    sigset_t set;
+    socklen_t optlen = sizeof(optval);
 
-    if (argc != 4)
+    // Create the socket to communicate with supermarket process
+    sfd = socket(AF_UNIX, SOCK_STREAM, 0); // ip protocol
+    if (sfd == -1)
     {
-        fprintf(stdout, "Usage: %s <K> <C> <E>\n", argv[0]);
-        exit(EXIT_FAILURE);
+        perror("socket");
+        goto error;
     }
 
-    K = to_convert(argv[1]);
-    C = to_convert(argv[2]);
-    E = to_convert(argv[3]);
-
-    if (!(K > 0))
+    // Keep alive to ensure no unlimited waiting on write/read
+    optval = 1; // enable option
+    if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0)
     {
-        fprintf(stderr, "K should be greater than 0\n");
-        exit(EXIT_FAILURE);
+        perror("setsockopt");
+        goto error;
     }
 
-    if (!(E > 0 && E < C))
+    // Bind and wait for a connection with the client
+    if (bind(sfd, NULL, 0) == -1)
     {
-        fprintf(stderr, "E should be greater than 0 and lower than C \n");
-        exit(EXIT_FAILURE);
+        perror("bind");
+        goto error;
+    }
+    if (listen(sfd, 1) == -1)
+    {
+        perror("listen");
+        goto error;
+    }
+    csfd = accept(sfd, NULL, NULL);
+    if (csfd == -1)
+    {
+        perror("accept");
+        goto error;
     }
 
-    if (!(C > 0))
-    {
-        fprintf(stderr, "C should be greater than 0\n");
-        exit(EXIT_FAILURE);
-    }
+    // Setup signal handler 
+    sigemptyset(&set);
+    sigaddset(&set, SIGQUIT);
+    sigaddset(&set, SIGHUP);
+    pthread_sigmask(SIG_SETMASK, &set, NULL);
 
-    
-    
-    
+    /* ------------------------------- */
+    // pthread_mutex_t gateCustomers = PTHREAD_MUTEX_INITIALIZER;
+    // pthread_cond_t exitCustomers = PTHREAD_COND_INITIALIZER;
+
+    // Execute Supermarket PROCESS
+
     // pthread_create(&thNotifier, NULL, Notifier, NULL)
 
-
-    
-
-    /*int sigrecv;
-     sigset_t set;
-
-     sigemptyset(&set);
-     sigaddset(&set, SIGQUIT);
-     sigaddset(&set, SIGHUP);
-     pthread_sigmask(SIG_SETMASK, &set, NULL);
-
-     CHECK_EQ(sigwait(&set, &sigrecv), -1, sigwait);*/
-
-
-
-
     // Start Director
-    
+
     // set gateClosed
 
-
     // Start Supermarket
+    /* ------------------------------- */
+
+    // Wait for a signal (BLOCKING)
+    while (sigrecv != SIGHUP || sigrecv != SIGQUIT)
+    {
+        if (sigwait(&set, &sigrecv) != 0)
+        {
+            perror("sigwait");
+            goto error;
+        }
+    }
+
+    // Send signal received to supermarket
+    sprintf(msg, "%d", sigrecv);
+    if (write(csfd, msg, strlen(msg)) == -1)
+    {
+        perror("write");
+        goto error;
+    }
+
+    // Wait that the supermarket closes
+    while(true)
+    {
+        if (write(csfd, msg, strlen(msg)) == -1 && errno == EPIPE)
+        {
+            printf("Supermarket closed!\n");
+            break;
+        }
+        else
+        {
+            sleep(1);
+        }
+    }
+
+    // CAREFUL TO SIGPIPE
+
+    close(sfd);
+    return 0;
+
+error:
+
+    // close supermarket
+    
+
+    close(sfd);
 }

@@ -6,9 +6,6 @@
 
 #define MAX_LINE 50
 
-/* Global variables */
-long K, C, E, T, P, S;
-
 /* Mutex to access log file */
 pthread_mutex_t logAccess;
 

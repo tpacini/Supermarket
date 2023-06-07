@@ -6,6 +6,7 @@
 #include "glob.h"
 #include "cashier.h"
 #include "customer.h"
+#include "main.h"
 #include "director.h"
 
 void free_cu(Customer_t* cu)
@@ -35,9 +36,9 @@ int chooseCashier (Cashier_t* c)
     for (; i < K; i++)
     {
         // No mutex: tradeoff performance-optimal result
-        if (cashiers[i].queueCustomers != NULL)
+        if (cashiers[i]->queueCustomers != NULL)
         {
-            if (cashiers[i].queueCustomers->qlen < c->queueCustomers->qlen)
+            if (cashiers[i]->queueCustomers->qlen < c->queueCustomers->qlen)
             {
                 c = &(cashiers[i]);
             }
