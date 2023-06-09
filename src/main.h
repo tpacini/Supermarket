@@ -11,3 +11,5 @@ int init_cashier(Cashier_t* ca);
 
 /* 0 on success, -1 otherwise */
 int destroy_cashier(Cashier_t* ca);
+
+int enterCustomers();

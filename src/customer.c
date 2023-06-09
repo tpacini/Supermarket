@@ -194,10 +194,17 @@ void* CustomerP()
     fclose(fp);
     pthread_mutex_unlock(&logAccess);
 
+    // Decrease number of customers inside supermarket
+    pthread_mutex_lock(&numCu);
+    nCustomer -= 1;
+    pthread_mutex_unlock(&numCu);
+
 error:
     ca = NULL;
     if (cu != NULL)
         free_cu(cu);
     if (logMsg != NULL)
         free(logMsg);
+
+    pthread_exit(0);
 }

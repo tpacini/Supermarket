@@ -13,6 +13,9 @@ pthread_mutex_t logAccess;
 pthread_mutex_t configAccess;
 
 
+unsigned int nCustomer;
+pthread_mutex_t numCu;
+
 unsigned char* config_filename; 
 
 unsigned int convert(char *st);

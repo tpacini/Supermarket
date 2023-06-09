@@ -2,12 +2,49 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 
 #include "glob.h"
 #include "main.h"
 #include "customer.h"
 
+
+int enterCustomer()
+{
+    int n, ret;
+
+    pthread_mutex_lock(&numCu);
+    n = nCustomer;
+    pthread_mutex_lock(&numCu);
+
+    // Start E customer threads
+    if (nCustomer <= C-E)
+    {
+        pthread_mutex_lock(&numCu);
+        nCustomer += E;
+        pthread_mutex_lock(&numCu);
+        for (int i = 0; i < E; i++)
+        {
+            pthread_t thCu;
+
+            ret = pthread_create(&thCu, NULL, CustomerP, NULL);
+            if (ret != 0)
+            {
+                perror("pthread_create");
+                return -1;
+            }
+            if (pthread_detach(thCu) != 0)
+            {
+                perror("pthread_detach");
+                return -1;
+            }
+        }
+    }
+
+    return 0;
+}
 
 int init_cashier(Cashier_t *ca)
 {
@@ -57,6 +94,9 @@ int main(int argc, char* argv[])
     FILE* fp;
     char* buf, *tok;
     int sfd, ret;
+
+    fd_set s;
+    struct timeval timeout;
     
     unsigned int nCashier;
 
@@ -145,6 +185,10 @@ int main(int argc, char* argv[])
     free(buf);
     thread_mutex_unlock(&configAccess);
 
+    pthread_mutex_lock(&numCu);
+    nCustomer = 0;
+    pthread_mutex_unlock(&numCu);
+
     // Initialize cashiers' data
     cashiers = (Cashier_t**) malloc(K*sizeof(Cashier_t*));
     if (cashiers == NULL)
@@ -183,6 +227,9 @@ int main(int argc, char* argv[])
     }
 
     // Start customers' threads (C)
+    pthread_mutex_lock(&numCu);
+    nCustomer = C;
+    pthread_mutex_unlock(&numCu);
     for (int i = 0; i < C; i++)
     {
         pthread_t thCu;
@@ -214,10 +261,74 @@ int main(int argc, char* argv[])
         goto error;
     }
 
-    // read ... wait for signal
+    buf = (char*) malloc((1+1)*sizeof(char));
+    if (buf == NULL)
+    {
+        perror("malloc");
+        goto error;
+    }
+    memset(buf, 0, 2);
 
-    // close socket
+    FD_ZERO(&s);
+    FD_SET(sfd, &s);
 
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 100 * 1000; // 100 ms
+
+    while (true)
+    {
+        ret = select(sfd, &s, NULL, NULL, &timeout);
+        
+        // error
+        if (ret == -1)
+        {
+            perror("select");
+            goto error;
+        }
+
+        // timeout expired
+        else if (ret == 0)
+        {
+            ret = enterCustomers();
+            if (ret == -1)
+            {
+                perror("enterCustomers");
+                goto error;
+            }
+        }
+
+        // read ready
+        else
+        {
+            if (read(sfd, buf, 1) < 0)
+            {
+                perror("read");
+                goto error;
+            }
+            buf[1] = '\0';
+
+            if (strcmp(buf, "1") != 0 && strcmp(buf, "3") != 0)
+            {
+                FD_SET(sfd, &s);
+                continue;
+            }
+
+            close(sfd);
+
+            if (strcmp(buf, "1") == 0) // SIGHUP
+            {
+                // terminate customers' threads
+            }
+            else // SIGQUIT
+            {
+                // check until nCustomer equal 0
+            }
+
+            break;
+        }
+    }
+ 
+    free(buf);
 
     // Write to log
     // write supermarket data
