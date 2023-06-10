@@ -9,6 +9,36 @@
 #include "main.h"
 #include "director.h"
 
+int writeLogCustomer(unsigned int nQueue, unsigned int nProd, 
+                     unsigned int timeToBuy, unsigned int timeQueue)
+{
+    char *logMsg;
+    FILE *fp;
+    unsigned int timeInside = timeToBuy + timeQueue;
+
+    logMsg = (char *)malloc((10 * 4 + 3 + 1) * sizeof(char));
+    if (logMsg == NULL)
+    {
+        perror("malloc");
+        return -1;
+    }
+    sprintf(logMsg, "%10u %10u %10u %10u", timeInside, timeQueue, 
+                                nQueue, nProd);
+
+    pthread_mutex_lock(&logAccess);
+    fp = fopen(LOG_FILENAME, "a");
+    if (fp == NULL)
+    {
+        perror("fopen");
+        pthread_mutex_unlock(&logAccess);
+        free(logMsg);
+        return -1;
+    }
+    fwrite(logMsg, sizeof(char), len(logMsg), fp);
+    fclose(fp);
+    pthread_mutex_unlock(&logAccess);
+}
+
 void free_cu(Customer_t* cu)
 {
     if (&cu->finishedTurn)
@@ -59,7 +89,6 @@ int chooseCashier (Cashier_t* c)
 void* CustomerP()
 {
     struct timespec t, ts_start, ts_end, ts_queue, ts_checkline;
-    FILE* fp;
     char* logMsg;               // information for log file
     Cashier_t* ca;              // current cashier
     bool skipCashier = false;   // flag: try another cashier
@@ -172,39 +201,32 @@ void* CustomerP()
     ts_queue = diff(ts_start, ts_end);
 
     // Write into log file
-    timeQueue = ts_queue.tv_sec / 1000 + ts_queue.tv_nsec * 100000; // to ms
-    timeInside = timeToBuy + timeQueue;
-
-    logMsg = (char*) malloc((10*4+3+1)*sizeof(char));
-    if (logMsg == NULL)
+    ret = writeLogCustomer(nQueue, cu->nProd, timeToBuy, 
+                        timespec_to_ms(ts_queue));
+    if (ret != 0)
     {
-        perror("malloc");
+        perror("writeLogCustomer");
         goto error;
     }
-    sprintf(logMsg, "%10u %10u %10u %10u", timeInside, timeQueue, nQueue, cu->nProd);
 
-    pthread_mutex_lock(&logAccess);
-    fp = fopen("../log.txt", "a");
-    if (fp == NULL)
-    {
-        perror("fopen");
-        goto error;
-    }
-    fwrite(logMsg, sizeof(char), len(logMsg), fp);
-    fclose(fp);
-    pthread_mutex_unlock(&logAccess);
+    pthread_mutex_lock(&numCu);
+    totNCustomer += 1;
+    totNProd += cu->nProd;
+    pthread_mutex_unlock(&numCu);
 
+error:
     // Decrease number of customers inside supermarket
     pthread_mutex_lock(&numCu);
     nCustomer -= 1;
     pthread_mutex_unlock(&numCu);
 
-error:
     ca = NULL;
     if (cu != NULL)
         free_cu(cu);
     if (logMsg != NULL)
         free(logMsg);
+
+    // check all missing variables
 
     pthread_exit(0);
 }

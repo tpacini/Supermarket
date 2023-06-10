@@ -105,6 +105,12 @@ void CashierP(Cashier_t* ca)
         cu = pop(ca->queueCustomers);
         pthread_mutex_unlock(&ca->accessQueue);
 
+        // Close immediately the cashier
+        if (cu == NULL)
+        {
+            break;
+        }
+
         // Wake up customer
         pthread_mutex_lock(&cu->mutexC);
         nProd = cu->nProd;
@@ -150,4 +156,6 @@ error:
         free(buf);
     if (ftell(fp) >= 0)
         fclose(fp);
+
+    pthread_exit(0);
 }

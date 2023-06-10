@@ -2,6 +2,7 @@
 
 #pragma once
 
+
 unsigned int K, C, E, T, P, S;
 
 Cashier_t** cashiers; // list of all the cashiers
@@ -13,3 +14,7 @@ int init_cashier(Cashier_t* ca);
 int destroy_cashier(Cashier_t* ca);
 
 int enterCustomers();
+
+int waitCashierExit();
+
+int writeLogSupermarket();

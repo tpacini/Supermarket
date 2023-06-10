@@ -1,14 +1,182 @@
+#define _POSIX_C_SOURCE 199309L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 
 #include "glob.h"
 #include "main.h"
 #include "customer.h"
+
+unsigned int parseConfigFile()
+{
+    FILE *fp;
+    char *tok, *buf;
+    unsigned int nfc;
+
+    buf = (char *)malloc(MAX_LINE * sizeof(char));
+    if (buf == NULL)
+    {
+        perror("malloc");
+        return 0;
+    }
+
+    pthread_mutex_lock(&configAccess);
+    fp = fopen(CONFIG_FILENAME, 'r');
+    if (fp == NULL)
+    {
+        perror("fopen");
+        thread_mutex_unlock(&configAccess);
+        free(buf);
+        return 0;
+    }
+    
+    if (fseek(fp, 1L, SEEK_SET) == -1)
+    {
+        perror("fseek");
+        thread_mutex_unlock(&configAccess);
+        fclose(fp);
+        free(buf);
+        return 0;
+    }
+
+    if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
+    {
+        perror("fread");
+        thread_mutex_unlock(&configAccess);
+        fclose(fp);
+        free(buf);
+        return 0;
+    }
+    fclose(fp);
+
+    tok = strtok(buf, " ");
+    while (tok != NULL)
+    {
+        // Next element is nFirstCashier
+        if (strcmp(tok, ":") == 0)
+        {
+            tok = strtok(NULL, " ");
+            nfc = convert(tok);
+            if (nfc <= 0 || nfc > K)
+            {
+                perror("Number of initial cashiers should be higher \
+                        than 0 and lower than K");
+                thread_mutex_unlock(&configAccess);
+                free(buf);
+                return 0;
+            }
+        }
+        else
+            tok = strtok(NULL, " ");
+    }
+
+    free(buf);
+    thread_mutex_unlock(&configAccess);
+
+    return nfc;
+}
+
+int writeLogSupermarket()
+{
+    char *logMsg;
+    unsigned int to, mst;
+    FILE* fp;
+
+    // No need to mutex, all the threads terminated
+    fp = fopen(LOG_FILENAME, 'a');
+    if (fp == NULL)
+    {
+        perror("fopen");
+        return -1;
+    }
+
+    // Write supermarket data
+    logMsg = (char *)malloc((10 * 2 + 2 + 1) * sizeof(char));
+    if (logMsg == NULL)
+    {
+        perror("malloc");
+        close(fp);
+        return -1;
+    }
+    sprintf(logMsg, "%10u %10u\n", totNCustomer, totNProd);
+    fwrite(logMsg, sizeof(char), strlen(logMsg), fp);
+    free(logMsg);
+
+    // Write cashier's data
+    logMsg = (char *)malloc((10 * 4 + 4 + 1) * sizeof(char));
+    if (logMsg == NULL)
+    {
+        perror("malloc");
+        close(fp);
+        return -1;
+    }
+
+    // Write cashiers data
+    for (int i = 0; i < K; i++)
+    {
+        memset(logMsg, 0, strlen(logMsg));
+
+        // No need to mutex, all threads terminated
+        to = timespec_to_ms(cashiers[i]->timeOpen);
+        mst = timespec_to_ms(cashiers[i]->meanServiceTime);
+
+        sprintf(logMsg, "%10u %10u %10u %10u\n", cashiers[i]->nCustomer,
+                to, cashiers[i]->nClose, mst);
+        fwrite(logMsg, sizeof(char), strlen(logMsg), fp);
+    }
+
+    free(logMsg);
+    fclose(fp);
+
+    return 0;
+}
+
+int waitCashierExit()
+{
+    int empty = 0;
+    void* nullCu = NULL;
+    struct timespec timeout;
+
+    CLOCK_GETTIME(CLOCK_MONOTONIC, &timeout);
+    timeout.tv_sec = 0;
+    timeout.tv_nsec = 100 * 1000000; // 100 ms
+
+    /* If empty is true, push a null object for every cashier, 
+     * the null object when popped will make the cashiers exit */
+    for (int i = 0; i < K; i++)
+    {
+        // Wait that cashier handles customers
+        while (!empty)
+        {
+            pthread_mutex_lock(&cashiers[i]->accessQueue);
+            if (cashiers[i]->queueCustomers->qlen == 0)
+            {
+                push(cashiers[i]->queueCustomers, nullCu);
+                empty = 1;
+            }
+            pthread_mutex_unlock(&cashiers[i]->accessQueue);
+
+            if (!empty)
+            {
+                if (nanosleep(&timeout, NULL) != 0)
+                {
+                    perror("nanosleep");
+                    return -1;
+                }
+            }
+        }
+
+        empty = 0;
+    }
+
+    return 0;
+}
 
 
 int enterCustomer()
@@ -90,15 +258,19 @@ int destroy_cashier(Cashier_t* ca)
 }
 
 int main(int argc, char* argv[])
-{   
-    FILE* fp;
-    char* buf, *tok;
+{
+    char* buf;
     int sfd, ret;
+    unsigned int nFirstCashier;  // number of cashier to start at time 0
 
+    /* Variables for "select" */
     fd_set s;
     struct timeval timeout;
+
+    /* Global variables for log file */
+    unsigned int totNCustomer = 0;
+    unsigned int totNProd = 0;
     
-    unsigned int nCashier;
 
     if (argc != 7)
     {
@@ -139,51 +311,13 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
 
-    // Parse nCashier from config
-    if (fseek(fp, 1L, SEEK_SET) == -1)
+    // Parse nFirstCashier from config
+    nFirstCashier = parseConfigFile();
+    if (nFirstCashier == 0)
     {
-        perror("fseek");
-        thread_mutex_unlock(&configAccess);
+        perror("parseConfigFile");
         goto error;
     }
-    if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
-    {
-        perror("fread");
-        thread_mutex_unlock(&configAccess);
-        goto error;
-    }
-    fclose(fp);
-
-    buf = (char*) malloc(MAX_LINE*sizeof(char));
-    if (buf == NULL)
-    {
-        perror("malloc");
-        pthread_mutex_lock(&configAccess);
-        goto error;
-    }
-
-    tok = strtok(buf, " ");
-    while (tok != NULL)
-    {
-        // Next element is nCashier
-        if (strcmp(tok, ":") == 0)
-        {
-            tok = strtok(NULL, " ");
-            nCashier = convert(tok);
-            if (nCashier <= 0 || nCashier > K)
-            {
-                perror("Number of initial cashiers should be higher \
-                        than 0 and lower than K");
-                thread_mutex_unlock(&configAccess);
-                goto error;
-            }
-        }
-        else
-            tok = strtok(NULL, " ");
-    }
-
-    free(buf);
-    thread_mutex_unlock(&configAccess);
 
     pthread_mutex_lock(&numCu);
     nCustomer = 0;
@@ -206,7 +340,7 @@ int main(int argc, char* argv[])
     }
 
     // Start cashiers' threads
-    for (int i = 0; i < nCashier; i++)
+    for (int i = 0; i < nFirstCashier; i++)
     {
         pthread_t thCa;
         pthread_mutex_lock(&cashiers[i]->accessState);
@@ -267,7 +401,6 @@ int main(int argc, char* argv[])
         perror("malloc");
         goto error;
     }
-    memset(buf, 0, 2);
 
     FD_ZERO(&s);
     FD_SET(sfd, &s);
@@ -278,14 +411,11 @@ int main(int argc, char* argv[])
     while (true)
     {
         ret = select(sfd, &s, NULL, NULL, &timeout);
-        
-        // error
         if (ret == -1)
         {
             perror("select");
             goto error;
         }
-
         // timeout expired
         else if (ret == 0)
         {
@@ -296,7 +426,6 @@ int main(int argc, char* argv[])
                 goto error;
             }
         }
-
         // read ready
         else
         {
@@ -330,15 +459,27 @@ int main(int argc, char* argv[])
  
     free(buf);
 
-    // Write to log
-    // write supermarket data
-    // write cashier's data
+    ret = waitCashierExit();
+    if (ret != 0)
+    {
+        perror("waitCashierExit");
+        goto error;
+    }
 
+    // HERE ALL CUSTOMERS SHOULD BE CLOSED
+    // HERE ALL CASHIERS SHOULD BE CLOSED
+
+    ret = writeLogSupermarket();
+    if (ret != 0)
+    {
+        perror("writeLogSupermarket");
+        goto error;
+    }
+    
 error:
     if (buf != NULL)
         free(buf);
-    if (ftell(fp) >= 0)
-        fclose(fp);
+
     if (cashiers != NULL)
     {
         for (int i = 0; i < K; i++)
@@ -349,6 +490,7 @@ error:
         free(cashiers);
     }
 
+    // check all missing variables
     // TODO: NOTIFY DIRECTOR OF THE ERROR
     // close socket if open
 }
