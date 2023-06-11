@@ -15,7 +15,7 @@ pthread_mutex_t logAccess;
 pthread_mutex_t configAccess;
 
 
-unsigned int nCustomer;
+unsigned int currentNCustomer;
 unsigned int totNCustomer;
 unsigned int totNProd;
 pthread_mutex_t numCu;

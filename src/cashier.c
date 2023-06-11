@@ -10,6 +10,7 @@
 #include "cashier.h"
 #include "glob.h"
 #include "customer.h"
+#include "main.h"
 
 bool is_open (Cashier_t* ca)
 {
@@ -23,11 +24,65 @@ bool is_open (Cashier_t* ca)
     return result;
 }
 
-void CashierP(Cashier_t* ca)
+int init_cashier(Cashier_t *ca)
+{
+    if (ca == NULL)
+    {
+        ca = (Cashier_t *)malloc(sizeof(Cashier_t));
+        if (ca == NULL)
+        {
+            perror("malloc");
+            return -1;
+        }
+    }
+
+    // If all customers inside the supermarket are in this line
+    // --> length = C
+    if ((ca->queueCustomers = initBQueue(C)) == NULL)
+    {
+        perror("initBQueue");
+        return -1;
+    }
+
+    if (pthread_mutex_init(&ca->accessQueue, NULL) != 0 ||
+        pthread_mutex_init(&ca->accessState, NULL) != 0 ||
+        pthread_mutex_init(&ca->accessLogInfo, NULL) != 0)
+    {
+        perror("pthread_mutex_init");
+        return -1;
+    }
+
+    ca->nClose = 0;
+    ca->totNCustomer = 0;
+    ca->totNProds = 0;
+    ca->open = false;
+
+    return 0;
+}
+
+int destroy_cashier(Cashier_t *ca)
+{
+    if (ca == NULL)
+        return 0;
+
+    deleteBQueue(ca->queueCustomers, NULL);
+
+    if (pthread_mutex_destroy(&ca->accessQueue) != 0 ||
+        pthread_mutex_destroy(&ca->accessState) != 0 ||
+        pthread_mutex_destroy(&ca->accessLogInfo) != 0)
+    {
+        perror("pthread_mutex_destroy");
+        return -1;
+    }
+
+    free(ca);
+    return 0;
+}
+
+void CashierP(Cashier_t *ca)
 {
     unsigned char *buf, *tok;
     unsigned int nProd;
-    unsigned int totNProd = 0, totNCust = 0;
     struct timespec ts_pTime, ts_tot;
     struct timespec ts_start, ts_end;
     Customer_t *cu;
@@ -45,7 +100,7 @@ void CashierP(Cashier_t* ca)
 
     // Retrieve parameter from configuration file
     pthread_mutex_lock(&configAccess);
-    fp = fopen(config_filename, 'r');
+    fp = fopen(CONFIG_FILENAME, 'r');
     if (fp == NULL)
     {
         perror("fopen");
@@ -129,8 +184,8 @@ void CashierP(Cashier_t* ca)
         pthread_mutex_unlock(&cu->mutexC);
 
         ts_sTime = add_ts(ts_pTime, ts_sTime);
-        totNCust += 1;
-        totNProd += nProd;
+        ca->totNCustomer += 1;
+        ca->totNProds += nProd;
     }
 
     // Set closing time
@@ -142,10 +197,8 @@ void CashierP(Cashier_t* ca)
     // Save information of current service
     pthread_mutex_lock(&ca->accessLogInfo);
     ca->meanServiceTime = mean_ts(add_ts(ts_sTime, ca->meanServiceTime) \
-                            , totNCust);
+                            , ca->totNCustomer);
     ca->timeOpen = add_ts(ts_tot, ca->timeOpen);
-    ca->nCustomer += totNCust;
-    ca->nProds += totNProd;
     ca->nClose += 1;
     pthread_mutex_unlock(&ca->accessLogInfo);
 

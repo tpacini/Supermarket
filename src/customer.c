@@ -3,6 +3,7 @@
 #include <time.h>
 #include <stdio.h>
 #include <errno.h>
+
 #include "glob.h"
 #include "cashier.h"
 #include "customer.h"
@@ -37,18 +38,6 @@ int writeLogCustomer(unsigned int nQueue, unsigned int nProd,
     fwrite(logMsg, sizeof(char), len(logMsg), fp);
     fclose(fp);
     pthread_mutex_unlock(&logAccess);
-}
-
-void free_cu(Customer_t* cu)
-{
-    if (&cu->finishedTurn)
-        pthread_cond_destroy(&cu->finishedTurn);
-    if (&cu->startTurn)
-        pthread_cond_destroy(&cu->startTurn);
-    if (&cu->mutexC)
-        pthread_mutex_destroy(&cu->mutexC);
-
-    free(cu);
 }
 
 int chooseCashier (Cashier_t* c)
@@ -86,42 +75,72 @@ int chooseCashier (Cashier_t* c)
     return 0;
 }
 
-void* CustomerP()
+int init_customer(Customer_t *cu)
+{
+    if (cu == NULL)
+    {
+        cu = (Customer_t *)malloc(sizeof(Customer_t));
+        if (cu == NULL)
+        {
+            perror("malloc");
+            return -1;
+        }
+    }
+
+    if (pthread_mutex_init(&cu->mutexC, NULL) != 0 ||
+        pthread_mutex_init(&cu->accessState, NULL) != 0)
+    {
+        perror("pthread_mutex_init");
+        return -1;
+    }
+
+    if (pthread_cond_init(&cu->finishedTurn, NULL) != 0 ||
+        pthread_cond_init(&cu->startTurn, NULL) != 0)
+    {
+        perror("pthread_cond_init");
+        return -1;
+    }
+
+    cu->productProcessed = false;
+    cu->yourTurn = false;
+    cu->nProd = rand() % (P - 0 + 1);
+    cu->running = 0;
+
+    return 0;
+}
+
+int destroy_customer(Customer_t *cu)
+{
+    if (cu == NULL)
+        return 0;
+
+    if (pthread_mutex_destroy(&cu->mutexC) != 0 ||
+        pthread_mutex_destroy(&cu->accessState) != 0)
+    {
+        perror("pthread_mutex_destroy");
+        return -1;
+    }
+
+    if (pthread_cond_destroy(&cu->finishedTurn) != 0 ||
+        pthread_cond_destroy(&cu->startTurn) != 0)
+    {
+        perror("pthread_cond_destroy");
+        return -1;
+    }
+
+    free(cu);
+    return 0;
+}
+
+void* CustomerP(Customer_t *cu)
 {
     struct timespec t, ts_start, ts_end, ts_queue, ts_checkline;
-    char* logMsg;               // information for log file
     Cashier_t* ca;              // current cashier
     bool skipCashier = false;   // flag: try another cashier
 
     unsigned int ret;
     unsigned int nQueue = 0, timeInside, timeQueue;
     unsigned int timeToBuy = rand() % (T - 10 + 1) + 10;
-
-    Customer_t* cu = (Customer_t*) malloc(sizeof(Customer_t));
-    // TODO: cu_init(cu); 
-    if (cu == NULL)
-    {
-        perror("malloc");
-        goto error;
-    }
-    if (pthread_cond_init(&cu->finishedTurn, NULL) != 0)
-    {
-        perror("pthread_cond_init");
-        goto error;
-    }
-    if (pthread_cond_init(&cu->startTurn, NULL) != 0)
-    {
-        perror("pthread_cond_init");
-        goto error;
-    }
-    if (pthread_mutex_init(&cu->mutexC, NULL) != 0)
-    {
-        perror("pthread_mutex_init");
-        goto error;
-    }
-    cu->productProcessed = false;
-    cu->yourTurn = false;
-    cu->nProd = rand() % (P - 0 + 1);
 
     // Time spent inside the supermarket
     t.tv_nsec = (timeToBuy % 1000) * 1000000;
@@ -217,14 +236,12 @@ void* CustomerP()
 error:
     // Decrease number of customers inside supermarket
     pthread_mutex_lock(&numCu);
-    nCustomer -= 1;
+    currentNCustomer -= 1;
     pthread_mutex_unlock(&numCu);
-
-    ca = NULL;
-    if (cu != NULL)
-        free_cu(cu);
-    if (logMsg != NULL)
-        free(logMsg);
+    pthread_mutex_lock(&cu->accessState);
+    cu->running = 0;
+    pthread_mutex_unlock(&cu->accessState);
+    
 
     // check all missing variables
 

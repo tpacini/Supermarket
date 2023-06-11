@@ -5,16 +5,18 @@
 
 unsigned int K, C, E, T, P, S;
 
-Cashier_t** cashiers; // list of all the cashiers
+Cashier_t **cashiers; // list of all the cashiers
 
-/* 0 on success, -1 otherwise */
-int init_cashier(Cashier_t* ca);
+Customer_t **customers; // list of all the customers;
 
-/* 0 on success, -1 otherwise */
-int destroy_cashier(Cashier_t* ca);
+
+
+
 
 int enterCustomers();
 
-int waitCashierExit();
+int waitCashierTerm();
+
+int waitCustomerTerm();
 
 int writeLogSupermarket();
