@@ -10,14 +10,15 @@
 #include <sys/socket.h>
 
 #include "glob.h"
-#include "main.h"
+#include "supermarket.h"
 #include "customer.h"
 
 #define SIGHUP_STR "1"
 #define SIGQUIT_STR "3"
 #define SIGTERM 15
 
-unsigned int parseConfigFile()
+
+unsigned int parseNfc()
 {
     FILE *fp;
     char *tok, *buf;
@@ -213,8 +214,7 @@ int waitCashierTerm()
     return 0;
 }
 
-
-int enterCustomer()
+int enterCustomers()
 {
     int n, ret, index = 0, running;
     Customer_t *c;
@@ -303,37 +303,11 @@ int main(int argc, char* argv[])
     P = convert(argv[5]); // max. number of products
     S = convert(argv[6]); // time after customer looks for other cashiers
 
-    if (K <= 0)
-    {
-        fprintf(stderr, "K should be greater than 0\n");
-        exit(EXIT_FAILURE);
-    }
-    if (C <= 0)
-    {
-        fprintf(stderr, "C should be greater than 0\n");
-        exit(EXIT_FAILURE);
-    }
-    if (!(E > 0 && E < C))
-    {
-        fprintf(stderr, "E should be greater than 0 and lower than C \n");
-        exit(EXIT_FAILURE);
-    }
-    if(T <= 0)
-    {
-        fprintf(stderr, "T should be greater than 0\n");
-        exit(EXIT_FAILURE);
-    }
-    if (S <= 0)
-    {
-        fprintf(stderr, "S should be greater than 0\n");
-        exit(EXIT_FAILURE);
-    }
-
     // Parse nFirstCashier from config
-    nFirstCashier = parseConfigFile();
+    nFirstCashier = parseNfs();
     if (nFirstCashier == 0)
     {
-        perror("parseConfigFile");
+        perror("parseNfc");
         goto error;
     }
 

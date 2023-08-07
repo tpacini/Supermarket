@@ -8,7 +8,6 @@
 #define NOTIFY_TRESH 5000
 
 typedef struct cashier {
-    int id;
     BQueue_t* queueCustomers;
     pthread_mutex_t accessQueue;
     bool open;
@@ -24,11 +23,18 @@ typedef struct cashier {
 /* Cashier routine executed by a thread */
 void CashierP(Cashier_t* ca);
 
-/* 0 on success, -1 otherwise */
+/* Initialize all cashier's data.
+    Return 0 on success, -1 otherwise */
 int init_cashier(Cashier_t *ca);
 
-/* 0 on success, -1 otherwise */
+/* Free and delete all the allocated cashier's data.
+    Return 0 on success, -1 otherwise */
 int destroy_cashier(Cashier_t *ca);
 
-/* Check if the director shutdown the cashier */
+/* Check if the cashiers is open (concurrent safe).
+    Return true if it is open, false otherwise */
 bool is_open(Cashier_t* ca);
+
+/* Parse time required to process a single product, 
+    from the configuration file. Return 0 on errors. */
+unsigned int parseTimeProd();

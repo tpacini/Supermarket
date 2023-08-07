@@ -1,8 +1,5 @@
 time processing single product : 2
-time notification director : 150
+initial cashiers number : 1
 S1 : 2
 S2 : 5
-initial cashiers number : 1
-T : 200
-P : 100
-log file name : log.txt 
+

@@ -7,7 +7,7 @@
 #include "glob.h"
 #include "cashier.h"
 #include "customer.h"
-#include "main.h"
+#include "supermarket.h"
 #include "director.h"
 
 int writeLogCustomer(unsigned int nQueue, unsigned int nProd, 
@@ -38,6 +38,8 @@ int writeLogCustomer(unsigned int nQueue, unsigned int nProd,
     fwrite(logMsg, sizeof(char), len(logMsg), fp);
     fclose(fp);
     pthread_mutex_unlock(&logAccess);
+
+    return 0;
 }
 
 int chooseCashier (Cashier_t* c)
@@ -66,12 +68,8 @@ int chooseCashier (Cashier_t* c)
     pthread_mutex_lock(&c->accessQueue);
 
     if (c != pastCa)
-    {
-        pastCa = NULL;
         return 1;
-    }
     
-    pastCa = NULL;
     return 0;
 }
 
@@ -164,6 +162,7 @@ void* CustomerP(Customer_t *cu)
     {
         ret = chooseCashier(ca);
 
+        // Line picked or changed
         if (ret == 1) 
         {
             nQueue += 1;
@@ -173,6 +172,7 @@ void* CustomerP(Customer_t *cu)
                 skipCashier = true;
             }
 
+            // Push customer in the queue
             if (push(ca->queueCustomers, cu) == -1)
             {
                 perror("push");
@@ -181,6 +181,7 @@ void* CustomerP(Customer_t *cu)
             pthread_mutex_unlock(&ca->accessQueue);
         }
         
+        // The cashier has been closed, choose another cashier
         if (skipCashier)
         {
             nQueue -= 1;
@@ -242,8 +243,8 @@ error:
     cu->running = 0;
     pthread_mutex_unlock(&cu->accessState);
     
-
-    // check all missing variables
+    // Free customer data
+    destroy_customer(cu);
 
     pthread_exit(0);
 }

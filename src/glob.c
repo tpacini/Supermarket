@@ -34,13 +34,37 @@ struct timespec diff(struct timespec start, struct timespec end)
     return temp;
 }
 
-// CORRECT; SAFE???
 struct timespec ms_to_timespec(unsigned int milliseconds)
 {
     struct timespec t;
+    int microsec = 1000000;
 
-    t.tv_nsec = (milliseconds % 1000) * 1000000;
+    /* nanoseconds = milliseconds * microseconds */
+    t.tv_nsec = (milliseconds % 1000) * microsec;
+    
     t.tv_sec = milliseconds / 1000;
+
+    return t;
+}
+
+struct timespec add_ts(struct timespec a, struct timespec b)
+{
+    struct timespec t;
+    unsigned int temp;
+    unsigned int one_sec_ns = 1000000000;
+    int offset = 0;
+
+    /* If we reach more than one seconds in ns, we add 
+       those seconds to t.tv_sec */
+    temp = a.tv_nsec + b.tv_nsec;
+    if (temp > one_sec_ns){
+        offset = temp / one_sec_ns;
+        t.tv_nsec = temp % one_sec_ns;
+    }
+    else
+        t.tv_nsec = temp;
+
+    t.tv_sec = a.tv_sec + b.tv_sec + offset;
 
     return t;
 }

@@ -10,7 +10,7 @@
 #include "cashier.h"
 #include "glob.h"
 #include "customer.h"
-#include "main.h"
+#include "supermarket.h"
 
 bool is_open (Cashier_t* ca)
 {
@@ -41,6 +41,8 @@ int init_cashier(Cashier_t *ca)
     if ((ca->queueCustomers = initBQueue(C)) == NULL)
     {
         perror("initBQueue");
+        if (ca != NULL)
+            free(ca);
         return -1;
     }
 
@@ -72,6 +74,7 @@ int destroy_cashier(Cashier_t *ca)
         pthread_mutex_destroy(&ca->accessLogInfo) != 0)
     {
         perror("pthread_mutex_destroy");
+        free(ca);
         return -1;
     }
 
@@ -79,57 +82,46 @@ int destroy_cashier(Cashier_t *ca)
     return 0;
 }
 
-void CashierP(Cashier_t *ca)
+unsigned int parseTimeProd()
 {
+    unsigned int timeProd;
+    FILE* fp;
     unsigned char *buf, *tok;
-    unsigned int nProd;
-    struct timespec ts_pTime, ts_tot;
-    struct timespec ts_start, ts_end;
-    Customer_t *cu;
-    FILE *fp;
 
-    unsigned int procTime = rand() % (80 - 20 + 1) + 20;   // processing time
-    unsigned int timeProd = 0;                             // time to process single product
-    
-    struct timespec ts_sTime;
-    ts_sTime.tv_sec = 0;
-    ts_sTime.tv_nsec = 0;
+    buf = (char *)malloc(MAX_LINE * sizeof(char));
+    if (buf == NULL)
+    {
+        perror("malloc");
+        return 0;
+    }
 
-    // Set time of opening
-    clock_gettime(CLOCK_MONOTONIC, &ts_start);
-
-    // Retrieve parameter from configuration file
     pthread_mutex_lock(&configAccess);
     fp = fopen(CONFIG_FILENAME, 'r');
     if (fp == NULL)
     {
         perror("fopen");
         pthread_mutex_unlock(&configAccess);
-        goto error;
-    }
-
-    buf = (char*) malloc(MAX_LINE*sizeof(char));
-    if (buf == NULL)
-    {
-        perror("malloc");
-        thread_mutex_unlock(&configAccess);
-        goto error;
+        free(buf);
+        return 0;
     }
 
     if (fseek(fp, 0L, SEEK_SET) == -1)
     {
         perror("fseek");
         thread_mutex_unlock(&configAccess);
-        goto error;
+        free(buf);
+        return 0;
     }
     if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
     {
         perror("fread");
         thread_mutex_unlock(&configAccess);
-        goto error;
+        free(buf);
+        return 0;
     }
     fclose(fp);
-    
+    pthread_mutex_unlock(&configAccess);
+
     tok = strtok(buf, " ");
     while (tok != NULL)
     {
@@ -138,29 +130,56 @@ void CashierP(Cashier_t *ca)
         {
             tok = strtok(NULL, " ");
             timeProd = convert(tok);
-            if (timeProd > PROD_THRESH)
+            if (timeProd == NULL || timeProd > PROD_THRESH)
             {
-                perror("Time to process single product too large");
-                thread_mutex_unlock(&configAccess);
-                goto error;
+                perror("Time to process single product NULL or \
+                        too large");
+                free(buf);
+                return 0;
             }
         }
         else
             tok = strtok(NULL, " ");
-        
+    }
+    free(buf);
+
+    return timeProd;
+}
+
+void CashierP(Cashier_t *ca)
+{
+    unsigned int nProd;
+    struct timespec ts_pTime, ts_tot;
+    struct timespec ts_start, ts_end;
+    Customer_t *cu;
+
+    unsigned int procTime = rand() % (80 - 20 + 1) + 20;   // processing time
+    unsigned int timeProd = 0;                             // time to process single product
+    
+    struct timespec ts_sTime;
+    ts_sTime.tv_sec = 0;
+    ts_sTime.tv_nsec = 0;
+
+    // Retrieve parameter from configuration file
+    timeProd = parseTimeProd();
+    if (timeProd == 0)
+    {
+        perror("parseTimeProd");
+        goto error;
     }
 
-    free(buf);
-    pthread_mutex_unlock(&configAccess);
+    // Set time of opening
+    clock_gettime(CLOCK_MONOTONIC, &ts_start);
 
     // Start handling customers
     while(is_open(ca))   
     {
+        // Pop a customer
         pthread_mutex_lock(&ca->accessQueue);
         cu = pop(ca->queueCustomers);
         pthread_mutex_unlock(&ca->accessQueue);
 
-        // Close immediately the cashier
+        // NULL customer, close immediately the cashier
         if (cu == NULL)
         {
             break;
@@ -177,12 +196,13 @@ void CashierP(Cashier_t *ca)
         ts_pTime = ms_to_timespec(procTime + nProd * timeProd);
         nanosleep(&ts_pTime, NULL);
         
-        // Notify customer
+        // Notify customer that products have been processed
         pthread_mutex_lock(&cu->mutexC);
         cu->productProcessed = true;
         pthread_cond_signal(&cu->finishedTurn);
         pthread_mutex_unlock(&cu->mutexC);
 
+        // Update statistics
         ts_sTime = add_ts(ts_pTime, ts_sTime);
         ca->totNCustomer += 1;
         ca->totNProds += nProd;
@@ -203,12 +223,6 @@ void CashierP(Cashier_t *ca)
     pthread_mutex_unlock(&ca->accessLogInfo);
 
 error:
-    cu = NULL;
-
-    if (buf != NULL)
-        free(buf);
-    if (ftell(fp) >= 0)
-        fclose(fp);
 
     pthread_exit(0);
 }
