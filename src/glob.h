@@ -5,7 +5,7 @@
 #pragma once
 
 #define MAX_LINE 50
-#define LOG_FILENAME "./log.txt"
+#define LOG_FILENAME "./log.txt" // TAKE LOG FILENAME FROM CONFIG FILE
 #define CONFIG_FILENAME "./lib/config.txt"
 #define SUPMRKT_EXEC_PATH "./supermarket"
 

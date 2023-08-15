@@ -16,3 +16,7 @@ long to_long(char* to_convert);
 /* Parse S1 and S2 from the configuration file.
     Return 1 on success, 0 otherwise */
 unsigned int parseS(unsigned int *S1, unsigned int *S2);
+
+/* Start a new Cashier thread. Return 0 on success, 
+    -1 otherwise */
+int openCashier(Cashier_t *ca);

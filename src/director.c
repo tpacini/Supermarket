@@ -151,7 +151,7 @@ int openCashier(Cashier_t *ca)
 
 int main(int argc, char *argv[])
 {
-    int sfd, csfd, optval, sigrecv = 0, ret;
+    int sfd, csfd, optval, sigrecv = 0, ret, pid;
     char msg [2];
     sigset_t set;
     socklen_t optlen = sizeof(optval);
@@ -206,6 +206,7 @@ int main(int argc, char *argv[])
     {
         perror("parseS");
         goto error;
+    }
 
     // Create the socket to communicate with supermarket process
     sfd = socket(AF_UNIX, SOCK_STREAM, 0); // ip protocol
@@ -264,8 +265,8 @@ int main(int argc, char *argv[])
     pthread_mutex_unlock(&gateCustomers);
 
     // Execute Supermarket
-    ret = fork();
-    if (ret == 0)
+    pid = fork();
+    if (pid == 0)
     {
         execve(SUPMRKT_EXEC_PATH, argv, NULL);
         exit(EXIT_SUCCESS);
@@ -289,7 +290,7 @@ int main(int argc, char *argv[])
                 {
                     pthread_mutex_lock(&cashiers[i]->accessState);
                     /* Cashier is closed and the conditions have
-                        been met */
+                        been met -> open cashier */
                     if (!(&cashiers[i]->open) && found)
                     {
                         ret = openCashier(cashiers[i]);
@@ -299,7 +300,8 @@ int main(int argc, char *argv[])
                         break;
                     }
                     /* Cashier is closed and the conditions have
-                        not been satisfied yet */
+                        not been satisfied yet -> save cashier for
+                        when conditions will be satisfied */
                     else if (!(&cashiers[i]->open))
                     {
                         closed_cashier = cashiers[i];
@@ -370,6 +372,7 @@ int main(int argc, char *argv[])
 error:
 
     // close supermarket
-    
+    kill(pid, SIGKILL);
+
     close(sfd);
 }
