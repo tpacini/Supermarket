@@ -268,7 +268,11 @@ int main(int argc, char *argv[])
     pid = fork();
     if (pid == 0)
     {
-        execve(SUPMRKT_EXEC_PATH, argv, NULL);
+        if (execve(SUPMRKT_EXEC_PATH, argv, NULL) == -1)
+        {
+            perror("execve");
+            exit(EXIT_FAILURE);
+        }
         exit(EXIT_SUCCESS);
     }
 
