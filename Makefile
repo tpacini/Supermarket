@@ -8,7 +8,7 @@ LDFLAGS 	= -L.
 OPTFLAGS 	= -O3 -DNDEBUG 
 LIBS        = -lpthread 
 
-TARGETS		= supermercato 
+TARGETS		= director 
 .PHONY: cleanall test 
 
 %: %.c
@@ -29,11 +29,11 @@ libBQueue.a:  lib/boundedqueue.o  lib/boundedqueue.h
 
 test:
 	@chmod +x analisi.sh
-	@./supermercato 6 50 3 & 
+	@./$(TARGETS) 6 50 3 & 
 	@sleep 25
 	@killall -s SIGHUP supermercato
 	@./analisi.sh
 
-cleanall    :
+cleanall:
 	@rm -f *.txt *.a *.o lib/*.o lib/*.a
-	@rm -f supermercato 
+	@rm -f director 
