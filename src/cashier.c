@@ -9,10 +9,11 @@
 
 #include "cashier.h"
 #include "glob.h"
-#include "customer.h"
 #include "supermarket.h"
 
-bool is_open (Cashier_t* ca)
+/* Check if the cashiers is open (concurrent safe).
+    Return true if it is open, false otherwise */
+static bool is_open (Cashier_t* ca)
 {
     bool result = false;
 
@@ -82,7 +83,9 @@ int destroy_cashier(Cashier_t *ca)
     return 0;
 }
 
-unsigned int parseTimeProd()
+/* Parse time required to process a single product,
+    from the configuration file. Return 0 on errors. */
+static unsigned int parseTimeProd()
 {
     unsigned int timeProd;
     FILE* fp;
@@ -130,7 +133,7 @@ unsigned int parseTimeProd()
         {
             tok = strtok(NULL, " ");
             timeProd = convert(tok);
-            if (timeProd == NULL || timeProd > PROD_THRESH)
+            if (timeProd > PROD_THRESH)
             {
                 perror("Time to process single product NULL or \
                         too large");

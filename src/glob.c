@@ -1,9 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include "glob.h"
+#include <ctype.h>
 
-unsigned char* global_filename = 'lib/config.txt';
+#include "glob.h"
 
 unsigned int convert(char *st)
 {
@@ -11,7 +11,7 @@ unsigned int convert(char *st)
     for (x = st; *x; x++)
     {
         if (!isdigit(*x))
-            return NULL;
+            return UINT_MAX;
     }
     return (strtoul(st, NULL, 10));
 }

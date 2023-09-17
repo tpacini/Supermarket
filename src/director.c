@@ -7,11 +7,11 @@
 #include <unistd.h>
 #include <sys/socket.h>
 
-#include "glob.h"
 #include "director.h"
+#include "glob.h"
 #include "supermarket.h"
 
-long to_long(char* to_convert)
+static long to_long(char* to_convert)
 {
     char *endptr;
     long val;
@@ -35,7 +35,9 @@ long to_long(char* to_convert)
     return val;
 }
 
-unsigned int parseS(unsigned int *S1, unsigned int* S2)
+/* Parse S1 and S2 from the configuration file.
+    Return 1 on success, 0 otherwise */
+static unsigned int parseS(unsigned int *S1, unsigned int* S2)
 {
     FILE* fp;
     unsigned char *buf1, *buf2, *tok;
@@ -102,6 +104,13 @@ unsigned int parseS(unsigned int *S1, unsigned int* S2)
         {
             tok = strtok(NULL, " ");
             S1 = convert(tok);
+            if (S1 == UINT_MAX)
+            {
+                perror("convert");
+                free(buf1);
+                free(buf2);
+                return 0;
+            }
         }
         else
             tok = strtok(NULL, " ");
@@ -116,6 +125,12 @@ unsigned int parseS(unsigned int *S1, unsigned int* S2)
         {
             tok = strtok(NULL, " ");
             S2 = convert(tok);
+            if (S2 == UINT_MAX)
+            {
+                perror("convert");
+                free(buf2);
+                return 0;
+            }
         }
         else
             tok = strtok(NULL, " ");
@@ -125,7 +140,9 @@ unsigned int parseS(unsigned int *S1, unsigned int* S2)
     return 1;
 }
 
-int openCashier(Cashier_t *ca)
+/* Start a new Cashier thread. Return 0 on success,
+    -1 otherwise */
+static int openCashier(Cashier_t *ca)
 {
     int ret;
     pthread_t thCa;
@@ -162,6 +179,12 @@ int main(int argc, char *argv[])
     bool found = false;
     Cashier_t *closed_cashier = NULL;
 
+    if (pthread_mutex_init(&configAccess, NULL) != 0)
+    {
+        perror("pthread_mutex_init");
+        goto error;
+    }
+
     if (argc != 7)
     {
         fprintf(stdout, "Usage: %s <K> <C> <E> <T> <P> <S>\n", argv[0]);
@@ -174,6 +197,12 @@ int main(int argc, char *argv[])
     T = convert(argv[4]); // max. time to buy products
     P = convert(argv[5]); // max. number of products
     S = convert(argv[6]); // time after customer looks for other cashiers
+
+    if (K == UINT_MAX || C == UINT_MAX || E == UINT_MAX ||
+        T == UINT_MAX || P == UINT_MAX || S == UINT_MAX)
+    {
+        goto error;
+    }
 
     if (K <= 0)
     {
@@ -205,40 +234,6 @@ int main(int argc, char *argv[])
     if (ret == 0)
     {
         perror("parseS");
-        goto error;
-    }
-
-    // Create the socket to communicate with supermarket process
-    sfd = socket(AF_UNIX, SOCK_STREAM, 0); // ip protocol
-    if (sfd == -1)
-    {
-        perror("socket");
-        goto error;
-    }
-
-    // Keep alive to ensure no unlimited waiting on write/read
-    optval = 1; // enable option
-    if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0)
-    {
-        perror("setsockopt");
-        goto error;
-    }
-
-    // Bind and wait for a connection with the client
-    if (bind(sfd, NULL, 0) == -1)
-    {
-        perror("bind");
-        goto error;
-    }
-    if (listen(sfd, 1) == -1)
-    {
-        perror("listen");
-        goto error;
-    }
-    csfd = accept(sfd, NULL, NULL);
-    if (csfd == -1)
-    {
-        perror("accept");
         goto error;
     }
 
@@ -274,6 +269,40 @@ int main(int argc, char *argv[])
             exit(EXIT_FAILURE);
         }
         exit(EXIT_SUCCESS);
+    }
+
+    // Create the socket to communicate with supermarket process
+    sfd = socket(AF_UNIX, SOCK_STREAM, 0); // ip protocol
+    if (sfd == -1)
+    {
+        perror("socket");
+        goto error;
+    }
+
+    // Keep alive to ensure no unlimited waiting on write/read
+    optval = 1; // enable option
+    if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0)
+    {
+        perror("setsockopt");
+        goto error;
+    }
+
+    // Bind and wait for a connection with the client
+    if (bind(sfd, NULL, 0) == -1)
+    {
+        perror("bind");
+        goto error;
+    }
+    if (listen(sfd, 1) == -1)
+    {
+        perror("listen");
+        goto error;
+    }
+    csfd = accept(sfd, NULL, NULL);
+    if (csfd == -1)
+    {
+        perror("accept");
+        goto error;
     }
 
     // Wait for a signal (BLOCKING) for 150 ms, repeatedly
@@ -375,8 +404,30 @@ int main(int argc, char *argv[])
 
 error:
 
+    // Send signal received to supermarket
+    sprintf(msg, "%d", SIGQUIT);
+    if (write(csfd, msg, strlen(msg)) == -1)
+    {
+        perror("write");
+        exit(EXIT_FAILURE);
+    }
+
+    // Wait that the supermarket closes
+    while (true)
+    {
+        if (write(csfd, msg, strlen(msg)) == -1 && errno == EPIPE)
+        {
+            printf("Supermarket closed!\n");
+            break;
+        }
+        else
+        {
+            sleep(1);
+        }
+    }
+
     // close supermarket
-    kill(pid, SIGKILL);
+    //kill(pid, SIGKILL);
 
     close(sfd);
 }

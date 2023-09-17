@@ -1,22 +1,14 @@
-#include "cashier.h"
 #include <pthread.h>
 #include <stdbool.h>
 
-#pragma once
+#include "cashier.h"
+
+#ifndef __DIRECTOR_H
+#define __DIRECTOR_H
 
 /* Variables to handle customers with no products */
 pthread_cond_t exitCustomers;
 pthread_mutex_t gateCustomers;
 bool gateClosed;
 
-void DirectorP();
-
-long to_long(char* to_convert);
-
-/* Parse S1 and S2 from the configuration file.
-    Return 1 on success, 0 otherwise */
-unsigned int parseS(unsigned int *S1, unsigned int *S2);
-
-/* Start a new Cashier thread. Return 0 on success, 
-    -1 otherwise */
-int openCashier(Cashier_t *ca);
+#endif

@@ -1,8 +1,16 @@
 #include "cashier.h"
 #include "customer.h"
 
-#pragma once
+#ifndef __SUPERMARKET_H
+#define __SUPERMARKET_H
 
+/* Mutex to access log file */
+pthread_mutex_t logAccess;
+
+unsigned int currentNCustomer;
+unsigned int totNCustomer;
+unsigned int totNProd;
+pthread_mutex_t numCu;
 
 unsigned int K, C, E, T, P, S;
 
@@ -32,3 +40,5 @@ int waitCustomerTerm();
    of customers served, time open, number of time close and mean service time.
    Return 0 if success, -1 for errors. */
 int writeLogSupermarket();
+
+#endif

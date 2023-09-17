@@ -25,10 +25,10 @@ all: $(TARGETS)
 
 
 # target : prerequisites, following recipe
-supermarket: glob.o customer.o 
+supermarket: src/glob.o
 	@$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $(LDFLAGS) $^ -o $@ $(LIBS)
 
-director: supermarket.o
+director: src/supermarket.o src/glob.o
 	@$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $(LDFLAGS) $^ -o $@ $(LIBS)
 
 libBQueue.a:  lib/boundedqueue.o  lib/boundedqueue.h  
@@ -50,5 +50,6 @@ test2:
 	@./director 6 50 3 200 100 20 & 
 	@sleep 25
 	@killall -s SIGHUP director
-	@./analisi.sh
+
+# @./analisi.sh
 

@@ -1,26 +1,19 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <time.h>
+#include <limits.h>
 
-#pragma once
+#ifndef __GLOB_H
+#define __GLOB_H
 
 #define MAX_LINE 50
 #define LOG_FILENAME "./log.txt" // TAKE LOG FILENAME FROM CONFIG FILE
 #define CONFIG_FILENAME "./lib/config.txt"
 #define SUPMRKT_EXEC_PATH "./supermarket"
-
-/* Mutex to access log file */
-pthread_mutex_t logAccess;
+#define DEBUG 1
 
 /* Mutex to access configuration file*/
 pthread_mutex_t configAccess;
-
-
-unsigned int currentNCustomer;
-unsigned int totNCustomer;
-unsigned int totNProd;
-pthread_mutex_t numCu;
- 
 
 unsigned int convert(char *st);
 
@@ -39,3 +32,5 @@ struct timespec add_ts(struct timespec a, struct timespec b);
 struct timespec mean_ts(struct timespec tot, unsigned int n);
 
 unsigned int timespec_to_ms(struct timespec ts);
+
+#endif

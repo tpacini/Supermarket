@@ -2,7 +2,8 @@
 #include <time.h>
 #include "lib/boundedqueue.h"
 
-#pragma once
+#ifndef __CASHIER_H
+#define __CASHIER_H
 
 #define PROD_THRESH 1000
 #define NOTIFY_TRESH 5000
@@ -31,10 +32,4 @@ int init_cashier(Cashier_t *ca);
     Return 0 on success, -1 otherwise */
 int destroy_cashier(Cashier_t *ca);
 
-/* Check if the cashiers is open (concurrent safe).
-    Return true if it is open, false otherwise */
-bool is_open(Cashier_t* ca);
-
-/* Parse time required to process a single product, 
-    from the configuration file. Return 0 on errors. */
-unsigned int parseTimeProd();
+#endif

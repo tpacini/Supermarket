@@ -9,9 +9,8 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 
-#include "glob.h"
 #include "supermarket.h"
-#include "customer.h"
+#include "glob.h"
 
 #define SIGHUP_STR "1"
 #define SIGQUIT_STR "3"
@@ -68,7 +67,7 @@ unsigned int parseNfc()
         {
             tok = strtok(NULL, " ");
             nfc = convert(tok);
-            if (nfc <= 0 || nfc > K)
+            if (nfc > K)
             {
                 perror("Number of initial cashiers should be higher \
                         than 0 and lower than K");
@@ -288,7 +287,16 @@ int main(int argc, char* argv[])
     /* Global variables for log file */
     unsigned int totNCustomer = 0;
     unsigned int totNProd = 0;
-    
+
+    currentNCustomer = 0;
+    totNCustomer = 0;
+    totNProd = 0;
+    if (pthread_mutex_init(&numCu, NULL) != 0 ||
+        pthread_mutex_init(&logAccess, NULL) != 0)
+    {
+        perror("pthread_mutex_init");
+        goto error;
+    }
 
     if (argc != 7)
     {
@@ -302,6 +310,12 @@ int main(int argc, char* argv[])
     T = convert(argv[4]); // max. time to buy products
     P = convert(argv[5]); // max. number of products
     S = convert(argv[6]); // time after customer looks for other cashiers
+
+    if (K == UINT_MAX || C == UINT_MAX || E == UINT_MAX ||
+        T == UINT_MAX || P == UINT_MAX || S == UINT_MAX)
+    {
+        goto error;
+    }
 
     // Parse nFirstCashier from config
     nFirstCashier = parseNfs();
@@ -393,6 +407,9 @@ int main(int argc, char* argv[])
         }
     }
 
+    if (DEBUG)
+        printf("Customers and Cashiers have been started.\n");
+
     // Handling SIGHUP or SIGQUIT from Director
     sfd = socket(AF_UNIX, SOCK_STREAM, 0); // ip protocol
     if (sfd == -1)
@@ -406,6 +423,9 @@ int main(int argc, char* argv[])
         perror("connect");
         goto error;
     }
+
+    if (DEBUG)
+        printf("Connected to socket.\n");
 
     buf = (char*) malloc((strlen(SIGHUP_STR)+1)*sizeof(char));
     if (buf == NULL)
@@ -459,6 +479,9 @@ int main(int argc, char* argv[])
             // Terminate customers' threads
             if (strcmp(buf, SIGQUIT_STR) == 0)
             {
+                if (DEBUG)
+                    printf("Read SIGQUIT signal.\n");
+
                 for (int i = 0; i < C; i++)
                 {
                     ret = pthread_kill(customers[i]->id, SIGTERM);
@@ -495,15 +518,18 @@ int main(int argc, char* argv[])
         goto error;
     }
 
-    // HERE ALL CUSTOMERS SHOULD BE CLOSED
-    // HERE ALL CASHIERS SHOULD BE CLOSED
-
+    if (DEBUG)
+        printf("Customers and Cashiers closed.\n");
+        
     ret = writeLogSupermarket();
     if (ret != 0)
     {
         perror("writeLogSupermarket");
         goto error;
     }
+
+    if (DEBUG)
+        printf("Saved information to log.\n");
     
 error:
     if (buf != NULL)
@@ -525,4 +551,7 @@ error:
 
     // TODO: different seed for every thread which used rand_r
     // TODO: fix log data due to errors in project's requirements
+
+    if (DEBUG)
+        printf("Quitting...\n");
 }

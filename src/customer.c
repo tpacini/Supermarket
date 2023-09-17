@@ -2,11 +2,12 @@
 
 #include <time.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <errno.h>
+#include <string.h>
 
-#include "glob.h"
-#include "cashier.h"
 #include "customer.h"
+#include "glob.h"
 #include "supermarket.h"
 #include "director.h"
 
@@ -35,7 +36,7 @@ int writeLogCustomer(unsigned int nQueue, unsigned int nProd,
         free(logMsg);
         return -1;
     }
-    fwrite(logMsg, sizeof(char), len(logMsg), fp);
+    fwrite(logMsg, sizeof(char), strlen(logMsg), fp);
     fclose(fp);
     pthread_mutex_unlock(&logAccess);
 
@@ -50,7 +51,7 @@ int chooseCashier (Cashier_t* c)
     pthread_mutex_lock(&c->accessQueue);
     if (c == NULL || c->queueCustomers == NULL)
     {
-        c = &(cashiers[0]);
+        c = cashiers[0];
         i = 1;
     }
         
@@ -61,7 +62,7 @@ int chooseCashier (Cashier_t* c)
         {
             if (cashiers[i]->queueCustomers->qlen < c->queueCustomers->qlen)
             {
-                c = &(cashiers[i]);
+                c = cashiers[i];
             }
         }
     }
@@ -133,11 +134,11 @@ int destroy_customer(Customer_t *cu)
 void* CustomerP(Customer_t *cu)
 {
     struct timespec t, ts_start, ts_end, ts_queue, ts_checkline;
-    Cashier_t* ca;              // current cashier
+    Cashier_t* ca = NULL;              // current cashier
     bool skipCashier = false;   // flag: try another cashier
 
     unsigned int ret;
-    unsigned int nQueue = 0, timeInside, timeQueue;
+    unsigned int nQueue = 0;
     unsigned int timeToBuy = rand() % (T - 10 + 1) + 10;
 
     // Time spent inside the supermarket
