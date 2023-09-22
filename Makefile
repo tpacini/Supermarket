@@ -4,7 +4,7 @@ ARFLAGS     =  rvs
 CC		    =  gcc
 CFLAGS	    = -std=c99 -Wall -g 
 INCLUDES	= -I .
-LDFLAGS 	= -L ./lib
+LDFLAGS 	= -L .
 OPTFLAGS 	= -O3 -DNDEBUG 
 LDLIBS      = -lpthread 
 
@@ -18,7 +18,7 @@ TARGETS		= supermarket director
 %: %.c
 	@$(CC) $(CFLAGS) $(INCLUDES) $(OPTFLAGS) -o $@ $< $(LDFLAGS) $(LIBS)
 
-%.o: %.c
+%.o: %.c %.h
 	@$(CC) $(CFLAGS) $(INCLUDES) $(OPTFLAGS) -c -o $@ $<
 
 all: $(TARGETS)
@@ -26,25 +26,13 @@ all: $(TARGETS)
 
 # target : prerequisites, following recipe
 # '@' before the command, to not print command
-supermarket: src/supermarket.o src/glob.o src/cashier.o
+supermarket: src/supermarket.o src/glob.o src/cashier.o src/customer.o lib/boundedqueue.o
 	$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 director: src/director.o src/glob.o
 	$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-src/supermarket.o: src/supermarket.c src/supermarket.h
-
-src/director.o: src/director.c src/director.h
-
-src/customer.o: src/customer.c src/customer.h
-
-src/cashier.o : src/cashier.c src/cashier.h 
-	$(CC) $(CFLAGS) $(INCLUDES) $(OPTFLAGS) -c -o $@ -llibBQueue
-
-src/glob.o : src/glob.c src/glob.h
-
-lib/libBQueue.a: lib/boundedqueue.h  
-	$(AR) $(ARFLAGS) $@ $^
+lib/boundedqueue.o: lib/boundedqueue.c lib/boundedqueue.h
 
 
 clean:
