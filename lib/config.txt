@@ -1,8 +1,5 @@
-tempo singolo prodotto : 2 
-tempo avviso direttore : 150
+time processing single product : 2
+initial cashiers number : 1
 S1 : 2
 S2 : 5
-numero casse iniziali : 1
-T : 200
-P : 100
-nome file log : log.txt 
+log filename: log.txt
