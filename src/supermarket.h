@@ -12,8 +12,6 @@ unsigned int totNCustomer;
 unsigned int totNProd;
 pthread_mutex_t numCu;
 
-unsigned int K, C, E, T, P, S;
-
 Cashier_t **cashiers; // list of all the cashiers
 
 Customer_t **customers; // list of all the customers;

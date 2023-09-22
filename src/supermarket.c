@@ -6,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <signal.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 
@@ -21,7 +22,7 @@ unsigned int parseNfc()
 {
     FILE *fp;
     char *tok, *buf;
-    unsigned int nfc;
+    unsigned int nfc = 0;
 
     buf = (char *)malloc(MAX_LINE * sizeof(char));
     if (buf == NULL)
@@ -31,11 +32,11 @@ unsigned int parseNfc()
     }
 
     pthread_mutex_lock(&configAccess);
-    fp = fopen(CONFIG_FILENAME, 'r');
+    fp = fopen(CONFIG_FILENAME, "r");
     if (fp == NULL)
     {
         perror("fopen");
-        thread_mutex_unlock(&configAccess);
+        pthread_mutex_unlock(&configAccess);
         free(buf);
         return 0;
     }
@@ -43,7 +44,7 @@ unsigned int parseNfc()
     if (fseek(fp, 1L, SEEK_SET) == -1)
     {
         perror("fseek");
-        thread_mutex_unlock(&configAccess);
+        pthread_mutex_unlock(&configAccess);
         fclose(fp);
         free(buf);
         return 0;
@@ -52,7 +53,7 @@ unsigned int parseNfc()
     if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
     {
         perror("fread");
-        thread_mutex_unlock(&configAccess);
+        pthread_mutex_unlock(&configAccess);
         fclose(fp);
         free(buf);
         return 0;
@@ -71,7 +72,7 @@ unsigned int parseNfc()
             {
                 perror("Number of initial cashiers should be higher \
                         than 0 and lower than K");
-                thread_mutex_unlock(&configAccess);
+                pthread_mutex_unlock(&configAccess);
                 free(buf);
                 return 0;
             }
@@ -81,7 +82,7 @@ unsigned int parseNfc()
     }
 
     free(buf);
-    thread_mutex_unlock(&configAccess);
+    pthread_mutex_unlock(&configAccess);
 
     return nfc;
 }
@@ -93,7 +94,7 @@ int writeLogSupermarket()
     FILE* fp;
 
     // No need to mutex, all the threads terminated
-    fp = fopen(LOG_FILENAME, 'a');
+    fp = fopen(LOG_FILENAME, "a");
     if (fp == NULL)
     {
         perror("fopen");
@@ -105,7 +106,7 @@ int writeLogSupermarket()
     if (logMsg == NULL)
     {
         perror("malloc");
-        close(fp);
+        fclose(fp);
         return -1;
     }
     sprintf(logMsg, "%10u %10u\n", totNCustomer, totNProd);
@@ -117,7 +118,7 @@ int writeLogSupermarket()
     if (logMsg == NULL)
     {
         perror("malloc");
-        close(fp);
+        fclose(fp);
         return -1;
     }
 
@@ -147,7 +148,7 @@ int waitCustomerTerm()
     unsigned int c = 0;
     struct timespec timeout;
 
-    CLOCK_GETTIME(CLOCK_MONOTONIC, &timeout);
+    clock_gettime(CLOCK_MONOTONIC, &timeout);
     timeout.tv_sec = 0;
     timeout.tv_nsec = 100 * 1000000; // 100 ms
 
@@ -178,7 +179,7 @@ int waitCashierTerm()
     void* nullCu = NULL;
     struct timespec timeout;
 
-    CLOCK_GETTIME(CLOCK_MONOTONIC, &timeout);
+    clock_gettime(CLOCK_MONOTONIC, &timeout);
     timeout.tv_sec = 0;
     timeout.tv_nsec = 100 * 1000000; // 100 ms
 
@@ -215,12 +216,8 @@ int waitCashierTerm()
 
 int enterCustomers()
 {
-    int n, ret, index = 0, running;
-    Customer_t *c;
-
-    pthread_mutex_lock(&numCu);
-    n = currentNCustomer;
-    pthread_mutex_lock(&numCu);
+    int ret, index = 0, running;
+    Customer_t *c = NULL;
 
     // Start E customer threads
     if (currentNCustomer <= C-E)
@@ -257,7 +254,13 @@ int enterCustomers()
                 }
             }
 
-            ret = pthread_create(&thCu, NULL, CustomerP, c);
+            if (c == NULL)
+            {
+                perror("No free structure found. enterCustomers");
+                return -1;
+            }
+
+            ret = pthread_create(&thCu, NULL, (void*)CustomerP, c);
             if (ret != 0)
             {
                 perror("pthread_create");
@@ -276,17 +279,13 @@ int enterCustomers()
 
 int main(int argc, char* argv[])
 {
-    char* buf;
+    char* buf = NULL;
     int sfd, ret;
     unsigned int nFirstCashier;  // number of cashier to start at time 0
 
     /* Variables for "select" */
     fd_set s;
     struct timeval timeout;
-
-    /* Global variables for log file */
-    unsigned int totNCustomer = 0;
-    unsigned int totNProd = 0;
 
     currentNCustomer = 0;
     totNCustomer = 0;
@@ -318,7 +317,7 @@ int main(int argc, char* argv[])
     }
 
     // Parse nFirstCashier from config
-    nFirstCashier = parseNfs();
+    nFirstCashier = parseNfc();
     if (nFirstCashier == 0)
     {
         perror("parseNfc");

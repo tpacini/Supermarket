@@ -3,10 +3,10 @@ ARFLAGS     =  rvs
 
 CC		    =  gcc
 CFLAGS	    = -std=c99 -Wall -g 
-INCLUDES	= -I.
-LDFLAGS 	= -L.
+INCLUDES	= -I .
+LDFLAGS 	= -L ./lib
 OPTFLAGS 	= -O3 -DNDEBUG 
-LIBS        = -lpthread 
+LDLIBS      = -lpthread 
 
 TARGETS		= supermarket director
 
@@ -25,18 +25,30 @@ all: $(TARGETS)
 
 
 # target : prerequisites, following recipe
-supermarket: src/glob.o
-	@$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $(LDFLAGS) $^ -o $@ $(LIBS)
+# '@' before the command, to not print command
+supermarket: src/supermarket.o src/glob.o src/cashier.o
+	$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-director: src/supermarket.o src/glob.o
-	@$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $(LDFLAGS) $^ -o $@ $(LIBS)
+director: src/director.o src/glob.o
+	$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-libBQueue.a:  lib/boundedqueue.o  lib/boundedqueue.h  
-	@$(AR) $(ARFLAGS) $@ $^
+src/supermarket.o: src/supermarket.c src/supermarket.h
+
+src/director.o: src/director.c src/director.h
+
+src/customer.o: src/customer.c src/customer.h
+
+src/cashier.o : src/cashier.c src/cashier.h 
+	$(CC) $(CFLAGS) $(INCLUDES) $(OPTFLAGS) -c -o $@ -llibBQueue
+
+src/glob.o : src/glob.c src/glob.h
+
+lib/libBQueue.a: lib/boundedqueue.h  
+	$(AR) $(ARFLAGS) $@ $^
 
 
 clean:
-	@rm -f *.txt src/*.a src/*.o lib/*.o lib/*.a
+	@rm -f *.txt src/*.o lib/*.o lib/*.a
 	@rm -f director supermarket
 
 test1:

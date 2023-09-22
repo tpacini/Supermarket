@@ -11,7 +11,9 @@
 #include "supermarket.h"
 #include "director.h"
 
-int writeLogCustomer(unsigned int nQueue, unsigned int nProd, 
+/* Write customer's statistics on log file.
+    Return 0 on success, -1 otherwise. */
+static int writeLogCustomer(unsigned int nQueue, unsigned int nProd, 
                      unsigned int timeToBuy, unsigned int timeQueue)
 {
     char *logMsg;
@@ -43,7 +45,11 @@ int writeLogCustomer(unsigned int nQueue, unsigned int nProd,
     return 0;
 }
 
-int chooseCashier (Cashier_t* c)
+/* Loop through all the open cashiers and pick the line with less customers,
+    if the choosen cashier is equal to the current one (c), the function returns 0, 1 otherwise.
+
+    Assumption: at least one register is open, take the risk of picking a line that could be closed in the meantime. */
+static int chooseCashier (Cashier_t* c)
 {
     int i = 0;
     Cashier_t* pastCa = c;
@@ -131,7 +137,7 @@ int destroy_customer(Customer_t *cu)
     return 0;
 }
 
-void* CustomerP(Customer_t *cu)
+void* CustomerP(void *c)
 {
     struct timespec t, ts_start, ts_end, ts_queue, ts_checkline;
     Cashier_t* ca = NULL;              // current cashier
@@ -140,6 +146,8 @@ void* CustomerP(Customer_t *cu)
     unsigned int ret;
     unsigned int nQueue = 0;
     unsigned int timeToBuy = rand() % (T - 10 + 1) + 10;
+
+    Customer_t* cu = (Customer_t*) c;
 
     // Time spent inside the supermarket
     t.tv_nsec = (timeToBuy % 1000) * 1000000;

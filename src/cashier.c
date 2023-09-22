@@ -8,8 +8,8 @@
 #include <string.h>
 
 #include "cashier.h"
+#include "customer.h"
 #include "glob.h"
-#include "supermarket.h"
 
 /* Check if the cashiers is open (concurrent safe).
     Return true if it is open, false otherwise */
@@ -89,9 +89,9 @@ static unsigned int parseTimeProd()
 {
     unsigned int timeProd;
     FILE* fp;
-    unsigned char *buf, *tok;
+    char *buf, *tok;
 
-    buf = (char *)malloc(MAX_LINE * sizeof(char));
+    buf = (char *) malloc(MAX_LINE * sizeof(char));
     if (buf == NULL)
     {
         perror("malloc");
@@ -99,7 +99,7 @@ static unsigned int parseTimeProd()
     }
 
     pthread_mutex_lock(&configAccess);
-    fp = fopen(CONFIG_FILENAME, 'r');
+    fp = fopen(CONFIG_FILENAME, "r");
     if (fp == NULL)
     {
         perror("fopen");
@@ -111,14 +111,14 @@ static unsigned int parseTimeProd()
     if (fseek(fp, 0L, SEEK_SET) == -1)
     {
         perror("fseek");
-        thread_mutex_unlock(&configAccess);
+        pthread_mutex_unlock(&configAccess);
         free(buf);
         return 0;
     }
     if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
     {
         perror("fread");
-        thread_mutex_unlock(&configAccess);
+        pthread_mutex_unlock(&configAccess);
         free(buf);
         return 0;
     }
@@ -149,12 +149,12 @@ static unsigned int parseTimeProd()
     return timeProd;
 }
 
-void CashierP(Cashier_t *ca)
+void* CashierP(void *c)
 {
     unsigned int nProd;
     struct timespec ts_pTime, ts_tot;
     struct timespec ts_start, ts_end;
-    Customer_t *cu;
+    Customer_t *cu = NULL;
 
     unsigned int procTime = rand() % (80 - 20 + 1) + 20;   // processing time
     unsigned int timeProd = 0;                             // time to process single product
@@ -162,6 +162,8 @@ void CashierP(Cashier_t *ca)
     struct timespec ts_sTime;
     ts_sTime.tv_sec = 0;
     ts_sTime.tv_nsec = 0;
+
+    Cashier_t *ca = (Cashier_t*) c;
 
     // Retrieve parameter from configuration file
     timeProd = parseTimeProd();

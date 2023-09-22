@@ -12,8 +12,10 @@
 #define SUPMRKT_EXEC_PATH "./supermarket"
 #define DEBUG 1
 
+extern unsigned int K, C, E, T, P, S;
+
 /* Mutex to access configuration file*/
-pthread_mutex_t configAccess;
+extern pthread_mutex_t configAccess;
 
 unsigned int convert(char *st);
 

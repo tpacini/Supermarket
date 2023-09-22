@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <time.h>
-#include "lib/boundedqueue.h"
+#include "../lib/boundedqueue.h"
 
 #ifndef __CASHIER_H
 #define __CASHIER_H
@@ -22,7 +22,7 @@ typedef struct cashier {
 } Cashier_t;
 
 /* Cashier routine executed by a thread */
-void CashierP(Cashier_t* ca);
+void* CashierP(void* c);
 
 /* Initialize all cashier's data.
     Return 0 on success, -1 otherwise */

@@ -1,46 +1,23 @@
-#define _POSIX_C_SOURCE 199309L
+#define _POSIX_C_SOURCE 199506L
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <signal.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/socket.h>
 
 #include "director.h"
 #include "glob.h"
 #include "supermarket.h"
 
-static long to_long(char* to_convert)
-{
-    char *endptr;
-    long val;
-
-    errno = 0; /* To distinguish success/failure after call */
-    val = strtol(to_convert, &endptr, 10);
-
-    if (errno != 0)
-    {
-        perror("strtol");
-        exit(EXIT_FAILURE);
-    }
-
-    if (endptr == to_convert)
-    {
-        fprintf(stderr, "No digits were found\n");
-        exit(EXIT_FAILURE);
-    }
-
-    free(endptr);
-    return val;
-}
-
 /* Parse S1 and S2 from the configuration file.
     Return 1 on success, 0 otherwise */
 static unsigned int parseS(unsigned int *S1, unsigned int* S2)
 {
     FILE* fp;
-    unsigned char *buf1, *buf2, *tok;
+    char *buf1, *buf2, *tok;
 
     buf1 = (char *)malloc(MAX_LINE * sizeof(char));
     buf2 = (char *)malloc(MAX_LINE * sizeof(char));
@@ -51,7 +28,7 @@ static unsigned int parseS(unsigned int *S1, unsigned int* S2)
     }
 
     pthread_mutex_lock(&configAccess);
-    fp = fopen(CONFIG_FILENAME, 'r');
+    fp = fopen(CONFIG_FILENAME, "r");
     if (fp == NULL)
     {
         perror("fopen");
@@ -64,7 +41,7 @@ static unsigned int parseS(unsigned int *S1, unsigned int* S2)
     if (fseek(fp, 2L, SEEK_SET) == -1)
     {
         perror("fseek");
-        thread_mutex_unlock(&configAccess);
+        pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
         return 0;
@@ -72,7 +49,7 @@ static unsigned int parseS(unsigned int *S1, unsigned int* S2)
     if (fread(buf1, sizeof(char), MAX_LINE, fp) == 0)
     {
         perror("fread");
-        thread_mutex_unlock(&configAccess);
+        pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
         return 0;
@@ -80,7 +57,7 @@ static unsigned int parseS(unsigned int *S1, unsigned int* S2)
     if (fseek(fp, 3L, SEEK_SET) == -1)
     {
         perror("fseek");
-        thread_mutex_unlock(&configAccess);
+        pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
         return 0;
@@ -88,7 +65,7 @@ static unsigned int parseS(unsigned int *S1, unsigned int* S2)
     if (fread(buf2, sizeof(char), MAX_LINE, fp) == 0)
     {
         perror("fread");
-        thread_mutex_unlock(&configAccess);
+        pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
         return 0;
@@ -103,8 +80,8 @@ static unsigned int parseS(unsigned int *S1, unsigned int* S2)
         if (strcmp(tok, ":") == 0)
         {
             tok = strtok(NULL, " ");
-            S1 = convert(tok);
-            if (S1 == UINT_MAX)
+            *S1 = convert(tok);
+            if (*S1 == UINT_MAX)
             {
                 perror("convert");
                 free(buf1);
@@ -124,8 +101,8 @@ static unsigned int parseS(unsigned int *S1, unsigned int* S2)
         if (strcmp(tok, ":") == 0)
         {
             tok = strtok(NULL, " ");
-            S2 = convert(tok);
-            if (S2 == UINT_MAX)
+            *S2 = convert(tok);
+            if (*S2 == UINT_MAX)
             {
                 perror("convert");
                 free(buf2);
@@ -168,7 +145,7 @@ static int openCashier(Cashier_t *ca)
 
 int main(int argc, char *argv[])
 {
-    int sfd, csfd, optval, sigrecv = 0, ret, pid;
+    int sfd = -1, csfd = -1, optval, sigrecv = 0, ret, pid;
     char msg [2];
     sigset_t set;
     socklen_t optlen = sizeof(optval);
@@ -346,9 +323,9 @@ int main(int argc, char *argv[])
                     pthread_mutex_unlock(&cashiers[i]->accessState);
 
                     pthread_mutex_lock(&cashiers[i]->accessQueue);
-                    if (&cashiers[i]->queueCustomers->qlen <= 1)
+                    if (*(&cashiers[i]->queueCustomers->qlen) <= 1)
                         countS1 += 1;
-                    if (&cashiers[i]->queueCustomers->qlen >= S2)
+                    if (*(&cashiers[i]->queueCustomers->qlen) >= S2)
                         countS2 += 1;
                     pthread_mutex_unlock(&cashiers[i]->accessQueue);
 
