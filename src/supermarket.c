@@ -17,6 +17,16 @@
 #define SIGQUIT_STR "3"
 #define SIGTERM 15
 
+unsigned int K, C, E, T, P, S;
+Cashier_t **cashiers;
+Customer_t **customers;
+pthread_mutex_t logAccess;
+unsigned int currentNCustomer;
+unsigned int totNCustomer;
+unsigned int totNProd;
+pthread_mutex_t numCu;
+
+pthread_mutex_t configAccess;
 
 unsigned int parseNfc()
 {
@@ -27,7 +37,7 @@ unsigned int parseNfc()
     buf = (char *)malloc(MAX_LINE * sizeof(char));
     if (buf == NULL)
     {
-        perror("malloc");
+        perror("parseNfc: malloc");
         return 0;
     }
 
@@ -35,15 +45,15 @@ unsigned int parseNfc()
     fp = fopen(CONFIG_FILENAME, "r");
     if (fp == NULL)
     {
-        perror("fopen");
+        perror("parseNfc: fopen");
         pthread_mutex_unlock(&configAccess);
         free(buf);
         return 0;
     }
-    
+    // Second row
     if (fseek(fp, 1L, SEEK_SET) == -1)
     {
-        perror("fseek");
+        perror("parseNfc: fseek");
         pthread_mutex_unlock(&configAccess);
         fclose(fp);
         free(buf);
@@ -52,7 +62,7 @@ unsigned int parseNfc()
 
     if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
     {
-        perror("fread");
+        perror("parseNfc: fread");
         pthread_mutex_unlock(&configAccess);
         fclose(fp);
         free(buf);
@@ -67,10 +77,18 @@ unsigned int parseNfc()
         if (strcmp(tok, ":") == 0)
         {
             tok = strtok(NULL, " ");
-            nfc = convert(tok);
+            errno = 0;
+            nfc = strtoul(tok, NULL, 10);
+            if (errno == EINVAL || errno == ERANGE)
+            {
+                fprintf(stderr, "parseNfc: strtoul: %d", errno);
+                pthread_mutex_unlock(&configAccess);
+                free(buf);
+                return 0;
+            }
             if (nfc > K)
             {
-                perror("Number of initial cashiers should be higher \
+                perror("parseNfc: number of initial cashiers should be higher \
                         than 0 and lower than K");
                 pthread_mutex_unlock(&configAccess);
                 free(buf);
@@ -83,6 +101,9 @@ unsigned int parseNfc()
 
     free(buf);
     pthread_mutex_unlock(&configAccess);
+
+    if (DEBUG)
+        printf("nfc: %d", nfc);
 
     return nfc;
 }
@@ -97,7 +118,7 @@ int writeLogSupermarket()
     fp = fopen(LOG_FILENAME, "a");
     if (fp == NULL)
     {
-        perror("fopen");
+        perror("writeLogSupermarket: fopen");
         return -1;
     }
 
@@ -105,7 +126,7 @@ int writeLogSupermarket()
     logMsg = (char *)malloc((10 * 2 + 2 + 1) * sizeof(char));
     if (logMsg == NULL)
     {
-        perror("malloc");
+        perror("writeLogSupermarket: malloc");
         fclose(fp);
         return -1;
     }
@@ -117,7 +138,7 @@ int writeLogSupermarket()
     logMsg = (char *)malloc((10 * 5 + 5 + 1) * sizeof(char));
     if (logMsg == NULL)
     {
-        perror("malloc");
+        perror("writeLogSupermarket: malloc");
         fclose(fp);
         return -1;
     }
@@ -164,7 +185,7 @@ int waitCustomerTerm()
         {
             if (nanosleep(&timeout, NULL) != 0)
             {
-                perror("nanosleep");
+                perror("waitCustomerTerm: nanosleep");
                 return -1;
             }
         }
@@ -202,7 +223,7 @@ int waitCashierTerm()
             {
                 if (nanosleep(&timeout, NULL) != 0)
                 {
-                    perror("nanosleep");
+                    perror("waitCashierTerm: nanosleep");
                     return -1;
                 }
             }
@@ -256,19 +277,19 @@ int enterCustomers()
 
             if (c == NULL)
             {
-                perror("No free structure found. enterCustomers");
+                perror("enterCustomers: no free structure found.");
                 return -1;
             }
 
             ret = pthread_create(&thCu, NULL, (void*)CustomerP, c);
             if (ret != 0)
             {
-                perror("pthread_create");
+                perror("enterCustomers: pthread_create");
                 return -1;
             }
             if (pthread_detach(thCu) != 0)
             {
-                perror("pthread_detach");
+                perror("enterCustomers: pthread_detach");
                 return -1;
             }
         }
@@ -293,7 +314,7 @@ int main(int argc, char* argv[])
     if (pthread_mutex_init(&numCu, NULL) != 0 ||
         pthread_mutex_init(&logAccess, NULL) != 0)
     {
-        perror("pthread_mutex_init");
+        perror("supermarket: pthread_mutex_init");
         goto error;
     }
 
@@ -303,24 +324,43 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
 
-    K = convert(argv[1]); // max. number of cashiers
-    C = convert(argv[2]); // max. number of customers inside supermarket
-    E = convert(argv[3]); // number of customers to enter supermarket simultaneously
-    T = convert(argv[4]); // max. time to buy products
-    P = convert(argv[5]); // max. number of products
-    S = convert(argv[6]); // time after customer looks for other cashiers
+    errno = 0;
+    ret = 1;
+    K = strtoul(argv[1], NULL, 10); // max. number of cashiers
+    ret *= (errno == EINVAL || errno == ERANGE) ? 0 : 1;
+    C = strtoul(argv[2], NULL, 10); // max. number of customers inside supermarket
+    ret *= (errno == EINVAL || errno == ERANGE) ? 0 : 1;
+    E = strtoul(argv[3], NULL, 10); // number of customers to enter supermarket simultaneously
+    ret *= (errno == EINVAL || errno == ERANGE) ? 0 : 1;
+    T = strtoul(argv[4], NULL, 10); // max. time to buy products
+    ret *= (errno == EINVAL || errno == ERANGE) ? 0 : 1;
+    P = strtoul(argv[5], NULL, 10); // max. number of products
+    ret *= (errno == EINVAL || errno == ERANGE) ? 0 : 1;
+    S = strtoul(argv[6], NULL, 10); // time after customer looks for other cashiers
+    ret *= (errno == EINVAL || errno == ERANGE) ? 0 : 1;
 
-    if (K == UINT_MAX || C == UINT_MAX || E == UINT_MAX ||
-        T == UINT_MAX || P == UINT_MAX || S == UINT_MAX)
+    if (ret == 0)
     {
+        perror("supermarket: error converting arguments");
         goto error;
+    }
+
+    if (K <= 0 || C <= 0 || T <= 0 || S <= 0 || P <= 0)
+    {
+        fprintf(stderr, "Parameters should be greater than 0\n");
+        exit(EXIT_FAILURE);
+    }
+    if (!(E > 0 && E < C))
+    {
+        fprintf(stderr, "E should be greater than 0 and lower than C \n");
+        exit(EXIT_FAILURE);
     }
 
     // Parse nFirstCashier from config
     nFirstCashier = parseNfc();
     if (nFirstCashier == 0)
     {
-        perror("parseNfc");
+        perror("supermarket: parseNfc");
         goto error;
     }
 
@@ -332,14 +372,14 @@ int main(int argc, char* argv[])
     cashiers = (Cashier_t**) malloc(K*sizeof(Cashier_t*));
     if (cashiers == NULL)
     {
-        perror("malloc");
+        perror("supermarket: malloc");
         goto error;
     }
     for (int i = 0; i < K; i++)
     {
         if(init_cashier(cashiers[i]) == -1)
         {
-            perror("init_cashier");
+            perror("supermarket: init_cashier");
             goto error;
         }
     }
@@ -355,12 +395,12 @@ int main(int argc, char* argv[])
         ret = pthread_create(&thCa, NULL, CashierP, cashiers[i]);
         if (ret != 0)
         {
-            perror("pthread_create");
+            perror("supermarket: pthread_create");
             goto error;
         }
         if (pthread_detach(thCa) != 0)
         {
-            perror("pthread_detach");
+            perror("supermarket: pthread_detach");
             goto error;
         }
     }
@@ -369,14 +409,14 @@ int main(int argc, char* argv[])
     customers = (Customer_t **)malloc(C * sizeof(Customer_t *));
     if (customers == NULL)
     {
-        perror("malloc");
+        perror("supermarket: malloc");
         goto error;
     }
     for (int i = 0; i < C; i++)
     {
         if (init_customer(customers[i]) == -1)
         {
-            perror("init_customer");
+            perror("supermarket: init_customer");
             goto error;
         }
     }
@@ -396,12 +436,12 @@ int main(int argc, char* argv[])
         ret = pthread_create(&thCu, NULL, CustomerP, customers[i]);
         if (ret != 0)
         {
-            perror("pthread_create");
+            perror("supermarket: pthread_create");
             goto error;
         }
         if (pthread_detach(thCu) != 0)
         {
-            perror("pthread_detach");
+            perror("supermarket: pthread_detach");
             goto error;
         }
     }
@@ -413,13 +453,13 @@ int main(int argc, char* argv[])
     sfd = socket(AF_UNIX, SOCK_STREAM, 0); // ip protocol
     if (sfd == -1)
     {
-        perror("socket");
+        perror("supermarket: socket");
         goto error;
     }
     ret = connect(sfd, NULL, 0);
     if (ret == -1)
     {
-        perror("connect");
+        perror("supermarket: connect");
         goto error;
     }
 
@@ -429,7 +469,7 @@ int main(int argc, char* argv[])
     buf = (char*) malloc((strlen(SIGHUP_STR)+1)*sizeof(char));
     if (buf == NULL)
     {
-        perror("malloc");
+        perror("supermarket: malloc");
         goto error;
     }
 
@@ -444,7 +484,7 @@ int main(int argc, char* argv[])
         ret = select(sfd, &s, NULL, NULL, &timeout);
         if (ret == -1)
         {
-            perror("select");
+            perror("supermarket: select");
             goto error;
         }
         // timeout expired
@@ -453,7 +493,7 @@ int main(int argc, char* argv[])
             ret = enterCustomers();
             if (ret == -1)
             {
-                perror("enterCustomers");
+                perror("supermarket: enterCustomers");
                 goto error;
             }
         }
@@ -462,10 +502,10 @@ int main(int argc, char* argv[])
         {
             if (read(sfd, buf, strlen(SIGHUP_STR)) < 0)
             {
-                perror("read");
+                perror("supermarket: read");
                 goto error;
             }
-            buf[1] = '\0';
+            buf[strlen(SIGHUP_STR)] = '\0';
 
             if (strcmp(buf, SIGHUP_STR) != 0 && strcmp(buf, SIGQUIT_STR) != 0)
             {
@@ -486,7 +526,7 @@ int main(int argc, char* argv[])
                     ret = pthread_kill(customers[i]->id, SIGTERM);
                     if (ret != 0)
                     {
-                        perror("pthread_kill");
+                        perror("supermarket: pthread_kill");
                         goto error;
                     }
                     destroy_customer(customers[i]);
@@ -496,10 +536,13 @@ int main(int argc, char* argv[])
             }
             else // wait customer termination
             {
+                if (DEBUG)
+                    printf("Read SIGHUP signal.\n");
+                
                 ret = waitCustomerTerm();
                 if (ret != 0)
                 {
-                    perror("waitCustomerTerm");
+                    perror("supermarket: waitCustomerTerm");
                     goto error;
                 }
             }
@@ -513,7 +556,7 @@ int main(int argc, char* argv[])
     ret = waitCashierTerm();
     if (ret != 0)
     {
-        perror("waitCashierTerm");
+        perror("supermarket: waitCashierTerm");
         goto error;
     }
 
@@ -523,7 +566,7 @@ int main(int argc, char* argv[])
     ret = writeLogSupermarket();
     if (ret != 0)
     {
-        perror("writeLogSupermarket");
+        perror("supermarket: writeLogSupermarket");
         goto error;
     }
 
@@ -544,6 +587,9 @@ error:
         free(cashiers);
     }
 
+    if (customers != NULL)
+        free(customers); 
+
     // check all missing variables (also customers, cashiers,..)
     // TODO: NOTIFY DIRECTOR OF THE ERROR
     // close socket if open
@@ -552,5 +598,5 @@ error:
     // TODO: fix log data due to errors in project's requirements
 
     if (DEBUG)
-        printf("Quitting...\n");
+        printf("Closing Supermarket...\n");
 }

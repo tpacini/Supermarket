@@ -5,16 +5,16 @@
 #define __SUPERMARKET_H
 
 /* Mutex to access log file */
-pthread_mutex_t logAccess;
+extern pthread_mutex_t logAccess;
 
-unsigned int currentNCustomer;
-unsigned int totNCustomer;
-unsigned int totNProd;
-pthread_mutex_t numCu;
+extern unsigned int currentNCustomer;
+extern unsigned int totNCustomer;
+extern unsigned int totNProd;
+extern pthread_mutex_t numCu;
 
-Cashier_t **cashiers; // list of all the cashiers
+extern Cashier_t **cashiers; // list of all the cashiers
 
-Customer_t **customers; // list of all the customers;
+extern Customer_t **customers; // list of all the customers;
 
 /* Retrieve number of cashiers to open at startup, from the 
     config file. Return number of first cashiers, 0 for errors. */

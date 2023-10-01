@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <time.h>
 #include <string.h>
+#include <math.h>
 
 #include "cashier.h"
 #include "customer.h"
@@ -32,16 +33,16 @@ int init_cashier(Cashier_t *ca)
         ca = (Cashier_t *)malloc(sizeof(Cashier_t));
         if (ca == NULL)
         {
-            perror("malloc");
+            perror("init_cashier: malloc");
             return -1;
         }
     }
 
-    // If all customers inside the supermarket are in this line
+    // If all customers inside the supermarket are lined up here
     // --> length = C
     if ((ca->queueCustomers = initBQueue(C)) == NULL)
     {
-        perror("initBQueue");
+        perror("init_cashier: initBQueue");
         if (ca != NULL)
             free(ca);
         return -1;
@@ -51,7 +52,7 @@ int init_cashier(Cashier_t *ca)
         pthread_mutex_init(&ca->accessState, NULL) != 0 ||
         pthread_mutex_init(&ca->accessLogInfo, NULL) != 0)
     {
-        perror("pthread_mutex_init");
+        perror("init_cashier: pthread_mutex_init");
         return -1;
     }
 
@@ -74,7 +75,7 @@ int destroy_cashier(Cashier_t *ca)
         pthread_mutex_destroy(&ca->accessState) != 0 ||
         pthread_mutex_destroy(&ca->accessLogInfo) != 0)
     {
-        perror("pthread_mutex_destroy");
+        perror("init_cashier: pthread_mutex_destroy");
         free(ca);
         return -1;
     }
@@ -91,10 +92,10 @@ static unsigned int parseTimeProd()
     FILE* fp;
     char *buf, *tok;
 
-    buf = (char *) malloc(MAX_LINE * sizeof(char));
+    buf = (char*) malloc(MAX_LINE * sizeof(char));
     if (buf == NULL)
     {
-        perror("malloc");
+        perror("parseTimeProd: malloc");
         return 0;
     }
 
@@ -102,7 +103,7 @@ static unsigned int parseTimeProd()
     fp = fopen(CONFIG_FILENAME, "r");
     if (fp == NULL)
     {
-        perror("fopen");
+        perror("parseTimeProd: fopen");
         pthread_mutex_unlock(&configAccess);
         free(buf);
         return 0;
@@ -110,14 +111,14 @@ static unsigned int parseTimeProd()
 
     if (fseek(fp, 0L, SEEK_SET) == -1)
     {
-        perror("fseek");
+        perror("parseTimeProd: fseek");
         pthread_mutex_unlock(&configAccess);
         free(buf);
         return 0;
     }
     if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
     {
-        perror("fread");
+        perror("parseTimeProd: fread");
         pthread_mutex_unlock(&configAccess);
         free(buf);
         return 0;
@@ -132,10 +133,17 @@ static unsigned int parseTimeProd()
         if (strcmp(tok, ":") == 0)
         {
             tok = strtok(NULL, " ");
-            timeProd = convert(tok);
+            errno = 0;
+            timeProd = strtoul(tok, NULL, 10);
+            if (errno == EINVAL || errno == ERANGE)
+            {
+                fprintf(stderr, "parseTimeProd: strtoul: %d", errno);
+                free(buf);
+                return 0;
+            }
             if (timeProd > PROD_THRESH)
             {
-                perror("Time to process single product NULL or \
+                perror("parseTimeProd: time to process single product NULL or \
                         too large");
                 free(buf);
                 return 0;
@@ -157,7 +165,7 @@ void* CashierP(void *c)
     Customer_t *cu = NULL;
 
     unsigned int procTime = rand() % (80 - 20 + 1) + 20;   // processing time
-    unsigned int timeProd = 0;                             // time to process single product
+    unsigned int timeProd = 1;                             // time to process single product
     
     struct timespec ts_sTime;
     ts_sTime.tv_sec = 0;
@@ -169,7 +177,7 @@ void* CashierP(void *c)
     timeProd = parseTimeProd();
     if (timeProd == 0)
     {
-        perror("parseTimeProd");
+        perror("CashierP: parseTimeProd");
         goto error;
     }
 
@@ -221,8 +229,19 @@ void* CashierP(void *c)
 
     // Save information of current service
     pthread_mutex_lock(&ca->accessLogInfo);
-    ca->meanServiceTime = mean_ts(add_ts(ts_sTime, ca->meanServiceTime) \
-                            , ca->totNCustomer);
+    ca->meanServiceTime = add_ts(ts_sTime, ca->meanServiceTime);
+    if (ca->totNCustomer == 0)
+    {
+        perror("CashierP: division by zero");
+        pthread_mutex_unlock(&ca->accessLogInfo);
+        goto error;
+    }
+
+    ca->meanServiceTime.tv_nsec = round(ca->meanServiceTime.tv_nsec \
+                                            / ca->totNCustomer);
+    ca->meanServiceTime.tv_sec = round(ca->meanServiceTime.tv_sec \
+                                            / ca->totNCustomer);
+
     ca->timeOpen = add_ts(ts_tot, ca->timeOpen);
     ca->nClose += 1;
     pthread_mutex_unlock(&ca->accessLogInfo);
