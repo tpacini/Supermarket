@@ -170,6 +170,75 @@ static int openCashier(Cashier_t *ca)
     return 0;
 }
 
+/* Check how many customers are queued in Cashiers' lines. Based
+   on parameters S1 and S2, the Director will open or close some cashiers
+   Return 0 on success, -1 otherwise */
+static int checkCashierSituation(unsigned int S1, unsigned int S2)
+{
+    int ret;
+    bool found = false;
+    unsigned int countS1 = 0, countS2 = 0;
+    Cashier_t *closed_cashier = NULL;
+    
+
+    // FIXME: Could be optimized??
+
+    for (int i = 0; i < K; i++)
+    {
+        pthread_mutex_lock(&cashiers[i]->accessState);
+
+        /* The current cashier is closed and the conditions have
+            been met -> open cashier */
+        if (!(&cashiers[i]->open) && found)
+        {
+            ret = openCashier(cashiers[i]);
+            if (ret != 0)
+            {
+                pthread_mutex_unlock(&cashiers[i]->accessState);
+                return -1;
+            }
+        }
+        /* cashier is closed and the conditions have
+            not been satisfied yet -> save cashier for
+            when conditions will be satisfied
+           or, cashier is not closed and the conditions have
+            not been satisfied yet -> look next cashier */
+        else if (!(&cashiers[i]->open) || found)
+        {
+            if (!(&cashiers[i]->open))
+                closed_cashier = cashiers[i];
+            
+            pthread_mutex_unlock(&cashiers[i]->accessState);
+            continue;
+        }
+
+        pthread_mutex_unlock(&cashiers[i]->accessState);
+
+        pthread_mutex_lock(&cashiers[i]->accessQueue);
+        if (*(&cashiers[i]->queueCustomers->qlen) <= 1)
+            countS1 += 1;
+        if (*(&cashiers[i]->queueCustomers->qlen) >= S2)
+            countS2 += 1;
+        pthread_mutex_unlock(&cashiers[i]->accessQueue);
+
+        // Conditions satisfied, open a cashier
+        if (countS1 >= S1 || countS2 >= 1)
+        {
+            found = true;
+            if (closed_cashier != NULL)
+            {
+                ret = openCashier(closed_cashier);
+                if (ret == -1)
+                    return -1;
+                else
+                    return 0;
+            }
+        }
+    }
+
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     // Command line arguments
@@ -178,22 +247,22 @@ int main(int argc, char *argv[])
     // Configuration file variables
     unsigned int S1 = 0, S2 = 0;
 
-    int ret; // return value
-    sigset_t set; // signal handler variable
-    int pid; // fork pid
-
-    int sfd = -1,
-        csfd = -1, optval, sigrecv = 0;
-    char msg [2];
-    
+    // Socket communication variables
+    struct sockaddr_un name;
+    int sfd, csfd = -1;
+    int optval;
     socklen_t optlen = sizeof(optval);
-    struct timespec wait_signal;
+    char msg[2];
 
-    unsigned int countS1, countS2;
-    bool found = false;
-    Cashier_t *closed_cashier = NULL;
+    // Signal handling variables
+    sigset_t set;
+    int sigrecv = 0;
 
-    struct sockaddr_un my_addr;
+    // Other variables
+    int ret;                        // return value
+    int pid;                        // fork pid
+    struct timespec wait_signal;    // main loop waiting time
+
 
     /* VARIABLE INITIALIZATION AND ARGUMENT PARSING */
     if (argc != 7)
@@ -274,193 +343,163 @@ int main(int argc, char *argv[])
         exit(EXIT_SUCCESS);
     }
 
-    /* CREATE SOCKET TO COMMUNICATE WITH SUPERMARKET */
-    sfd = socket(AF_UNIX, SOCK_STREAM, 0); // ip protocol
+    /* CREATE SOCKET TO COMMUNICATE WITH SUPERMARKET PROCESS */
+    sfd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
     if (sfd == -1)
     {
-        perror("director: socket");
+        DIR_PERROR("socket");
         goto error;
     }
+
+    // Build the address
+    memset(&name, 0, sizeof(name));
+    name.sun_family = AF_UNIX;
+    strncpy(name.sun_path, SOCKET_FILENAME, sizeof(name.sun_path) - 1);
+
+    // TODO: debug: print socket name.sun_path
 
     // Keep alive to ensure no unlimited waiting on write/read
     optval = 1; // enable option
-    if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0)
+    if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0) // TODO: check if setsockopt is needed
     {
-        perror("director: setsockopt");
+        DIR_PERROR("setsockopt");
         goto error;
     }
 
-    if (DEBUG)
-        printf("Before bind..\n");
-
-    my_addr.sun_family = AF_UNIX;
-    if (strlen(SOCKET_FILENAME) < 108)
-        strncpy(my_addr.sun_path, SOCKET_FILENAME, strlen(SOCKET_FILENAME)+1);
-    else
+    // Bind socket to socket name
+    if (bind(sfd, (const struct sockaddr*)&name, sizeof(name)) == -1)
     {
-        fprintf(stderr, "Socket filename too large");
+        DIR_PERROR("bind");
         goto error;
     }
 
-    // Bind and wait for a connection with the client
-    if (bind(sfd, (struct sockaddr*)&my_addr, sizeof(my_addr)) == -1)
-    {
-        perror("director: bind");
-        goto error;
-    }
+    // Prepare for accepting connection
     if (listen(sfd, 1) == -1)
     {
-        perror("director: listen");
+        DIR_PERROR("listen");
         goto error;
     }
+
+    // Wait for connection
     csfd = accept(sfd, NULL, NULL);
     if (csfd == -1)
     {
-        perror("director: accept");
+        DIR_PERROR("accept");
         goto error;
     }
 
-    if (DEBUG)
-        printf("Socket accepted!\n");
+    // TODO: debug, "New connection arrived! Socket with the client opened."
 
-    // Wait for a signal (BLOCKING) for 150 ms, repeatedly
+    /* Wait for a signal (BLOCKING) for 150 ms, repeatedly. If the timer        timeouts, execute the Director's routine (look for S1 and S2 parameters),
+    otherwise if a signal arrives, notify the Supermarket process through
+    the socket  */
     wait_signal.tv_sec = 0;
     wait_signal.tv_nsec = 150 * 1000000; // 150 ms
-    countS1 = 0;
-    countS2 = 0;
     while (sigrecv != SIGHUP || sigrecv != SIGQUIT)
     {
         errno = 0;
-        if ((sigrecv = sigtimedwait(&set, NULL, 
-                                        &wait_signal)) <= 0)
+        if ((sigrecv = sigtimedwait(&set, 
+                                    NULL, 
+                                    &wait_signal)) <= 0)
         {
-            /* After 150ms if no signal arrived, check
-                cashiers' situation */
+            // Timeout, no signal arrived
             if (sigrecv == -1 && errno == EAGAIN && cashiers != NULL)
             {
-                for (int i = 0; i < K; i++)
-                {
-                    pthread_mutex_lock(&cashiers[i]->accessState);
-                    /* Cashier is closed and the conditions have
-                        been met -> open cashier */
-                    if (!(&cashiers[i]->open) && found)
-                    {
-                        ret = openCashier(cashiers[i]);
-                        pthread_mutex_unlock(&cashiers[i]->accessState);
-                        if (ret == -1)
-                            goto error;
-                        break;
-                    }
-                    /* Cashier is closed and the conditions have
-                        not been satisfied yet -> save cashier for
-                        when conditions will be satisfied */
-                    else if (!(&cashiers[i]->open))
-                    {
-                        closed_cashier = cashiers[i];
-                        pthread_mutex_unlock(&cashiers[i]->accessState);
-                        continue;
-                    }
-                    else if (found)
-                    {
-                        pthread_mutex_unlock(&cashiers[i]->accessState);
-                        continue;
-                    }
-                    pthread_mutex_unlock(&cashiers[i]->accessState);
+                // TODO: debug "Check cashier situation"
 
-                    pthread_mutex_lock(&cashiers[i]->accessQueue);
-                    if (*(&cashiers[i]->queueCustomers->qlen) <= 1)
-                        countS1 += 1;
-                    if (*(&cashiers[i]->queueCustomers->qlen) >= S2)
-                        countS2 += 1;
-                    pthread_mutex_unlock(&cashiers[i]->accessQueue);
-
-                    // Conditions satisfied, open a cashier
-                    if (countS1 >= S1 || countS2 >= 1)
-                    {
-                        found = true;
-                        if (closed_cashier != NULL) 
-                        {
-                            ret = openCashier(closed_cashier);
-                            if (ret == -1)
-                                goto error;
-                            break;
-                        }
-                    }
-                }
+                ret = checkCashierSituation(S1, S2);
+                if (ret != 0)
+                    goto error;
             }
             else
             {
-                fprintf(stderr, "sigtimedwait: %d", errno);
+                DIR_PERROR("sigtimedwait");
                 goto error;
             }
         }
     }
 
-    if (DEBUG)
-        printf("Received signal %d, sending signal to supermarket\n", sigrecv);
+
+    // TODO: debug, "Received signal "sigrecv""
 
     // Send signal received to supermarket
     sprintf(msg, "%d", sigrecv);
-    if (write(csfd, msg, strlen(msg)) == -1)
+    if (write(csfd, msg, sizeof(msg)) == -1)
     {
-        perror("director: write");
+        DIR_PERROR("write");
         goto error;
     }
+
+    // TODO: debug, "Message with signal sent to supermarket"
 
     // Wait that the supermarket closes
     while(true)
     {
-        if (write(csfd, msg, strlen(msg)) == -1 && errno == EPIPE)
+        // Error returned and error is "receiving socket closed"
+        ret = write(csfd, msg, sizeof(msg));
+        if (ret == -1 && errno == EPIPE)
         {
-            printf("Supermarket closed!\n");
+            DIR_PRINTF("Supermarket closed!\n");
             break;
         }
-        else
+        else if (ret == -1)
         {
-            sleep(1);
+            DIR_PERROR("write, wait supermarket close");
+            goto error;
         }
+        else
+            sleep(1);
     }
 
-    // CAREFUL TO SIGPIPE
+    // TODO: copy the variables freed or destroyed in error, here
 
-    if (DEBUG)
-        printf("Closing Director...\n");
-
+    close(csfd);
     close(sfd);
     return 0;
 
-error:
+error: 
 
-    // Close supermarket, sending a SIGQUIT to it
-    sprintf(msg, "%d", SIGQUIT);
-    if (write(csfd, msg, strlen(msg)) == -1)
+    if (csfd != -1)
     {
-        perror("director: write");
-        exit(EXIT_FAILURE);
-    }
-
-    // Wait that the supermarket closes
-    while (true)
-    {
-        if (write(csfd, msg, strlen(msg)) == -1 && errno == EPIPE)
+        // Close supermarket, sending a SIGQUIT to it
+        sprintf(msg, "%d", SIGQUIT);
+        if (write(csfd, msg, sizeof(msg)) == -1)
         {
-            printf("Supermarket closed!\n");
-            break;
+            DIR_PERROR("write, error branch");
         }
         else
         {
-            sleep(1);
+            // Wait that the supermarket closes
+            while (true)
+            {
+                if (write(csfd, msg, strlen(msg)) == -1 && errno == EPIPE)
+                {
+                    printf("Supermarket closed!\n");
+                    break;
+                }
+                else
+                    sleep(1);
+            }
         }
     }
-
-    // close supermarket
-    //kill(pid, SIGKILL);
-
-
-    // TODO: destroy configAccess, gateCustomers, exitCustomers
+    
+    pthread_mutex_destroy(&configAccess);
+    pthread_mutex_destroy(&gateCustomers);
+    pthread_cond_destroy(&exitCustomers);
 
     // TODO: debug print director is exiting
 
     close(sfd);
+    close(csfd);
     return -1;
 }
+
+
+// GLOBAL TODO
+// TODO: Continue checking code and replacing perror and printf
+// TODO: Implement logger debug/warn/fatal/...
+// TODO: Differentiate between fatal errors and warnings
+
+// Director should handle customers with zero products, how are they handled and where?
+
+// What happens to the memory when you do the fork. The allocated variables will be duplicated

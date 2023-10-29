@@ -10,7 +10,7 @@
 #define LOG_FILENAME "log.txt" // TAKE LOG FILENAME FROM CONFIG FILE
 #define CONFIG_FILENAME "lib/config.txt"
 #define SUPMRKT_EXEC_PATH "supermarket"
-#define SOCKET_FILENAME "socket_file"
+#define SOCKET_FILENAME "/tmp/9Lq7BNBnBycd6nxy.socket"
 
 extern unsigned int K, C, E, T, P, S;
 
