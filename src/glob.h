@@ -7,10 +7,10 @@
 #define __GLOB_H
 
 #define MAX_LINE 50
-#define LOG_FILENAME "./log.txt" // TAKE LOG FILENAME FROM CONFIG FILE
-#define CONFIG_FILENAME "./lib/config.txt"
-#define SUPMRKT_EXEC_PATH "./supermarket"
-#define DEBUG 1
+#define LOG_FILENAME "log.txt" // TAKE LOG FILENAME FROM CONFIG FILE
+#define CONFIG_FILENAME "lib/config.txt"
+#define SUPMRKT_EXEC_PATH "supermarket"
+#define SOCKET_FILENAME "socket_file"
 
 extern unsigned int K, C, E, T, P, S;
 

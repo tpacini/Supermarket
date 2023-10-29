@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <signal.h>
+#include <sys/un.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 
@@ -308,6 +309,8 @@ int main(int argc, char* argv[])
     fd_set s;
     struct timeval timeout;
 
+    struct sockaddr_un dir_addr;
+
     currentNCustomer = 0;
     totNCustomer = 0;
     totNProd = 0;
@@ -456,7 +459,17 @@ int main(int argc, char* argv[])
         perror("supermarket: socket");
         goto error;
     }
-    ret = connect(sfd, NULL, 0);
+
+    dir_addr.sun_family = AF_UNIX;
+    if (strlen(SOCKET_FILENAME) < 108)
+        strncpy(dir_addr.sun_path, SOCKET_FILENAME, strlen(SOCKET_FILENAME)+1);
+    else
+    {
+        fprintf(stderr, "Socket filename too large");
+        goto error;
+    }
+
+    ret = connect(sfd, (struct sockaddr*)&dir_addr, 0);
     if (ret == -1)
     {
         perror("supermarket: connect");

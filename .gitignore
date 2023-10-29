@@ -56,3 +56,9 @@ dkms.conf
 
 # PDF files
 *.pdf
+
+# TXT files
+*.txt
+
+socket_file
+.socket_file.swp

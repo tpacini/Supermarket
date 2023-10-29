@@ -7,76 +7,86 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 
 #include "director.h"
 #include "glob.h"
 #include "supermarket.h"
+#include "lib/printer.h"
 
 pthread_mutex_t configAccess;
 Cashier_t **cashiers;
 
 /* Parse S1 and S2 from the configuration file.
-    Return 1 on success, 0 otherwise */
-static unsigned int parseS(unsigned int *S1, unsigned int* S2)
+    Return 0 on success, -1 otherwise */
+static int parseS(unsigned int *S1, unsigned int* S2)
 {
     FILE* fp;
     char *buf1, *buf2, *tok;
 
-    buf1 = (char *)malloc(MAX_LINE * sizeof(char));
-    buf2 = (char *)malloc(MAX_LINE * sizeof(char));
+    buf1 = (char*) malloc(MAX_LINE * sizeof(char));
+    buf2 = (char*) malloc(MAX_LINE * sizeof(char));
     if (buf1 == NULL || buf2 == NULL)
     {
-        perror("parseS: malloc");
-        return 0;
+        DIR_PERROR("parseS, malloc");
+        return -1;
     }
 
     pthread_mutex_lock(&configAccess);
     fp = fopen(CONFIG_FILENAME, "r");
     if (fp == NULL)
     {
-        perror("parseS: fopen");
+        DIR_PERROR("parseS, fopen");
         pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
-        return 0;
+        return -1;
     }
-    // Third row
+
+    // Read third line
     if (fseek(fp, 2L, SEEK_SET) == -1)
     {
-        perror("parseS: fseek");
+        DIR_PERROR("parseS, fseek");
         pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
-        return 0;
+        return -1;
     }
     if (fread(buf1, sizeof(char), MAX_LINE, fp) == 0)
     {
-        perror("parseS: fread");
+        DIR_PERROR("parseS, fread");
         pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
-        return 0;
+        return -1;
     }
-    // Fourth row
+
+    // TODO: debug print buf1
+
+    // Read fourth line
     if (fseek(fp, 3L, SEEK_SET) == -1)
     {
-        perror("parseS: fseek");
+        DIR_PERROR("parseS, fseek");
         pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
-        return 0;
+        return -1;
     }
     if (fread(buf2, sizeof(char), MAX_LINE, fp) == 0)
     {
-        perror("parseS: fread");
+        DIR_PERROR("parseS, fread");
         pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
-        return 0;
+        return -1;
     }
+
+    // TODO: debug print buf2
+
     fclose(fp);
     pthread_mutex_unlock(&configAccess);
 
+    // Parse variable S1 from line read
     tok = strtok(buf1, " ");
     while (tok != NULL)
     {
@@ -88,17 +98,20 @@ static unsigned int parseS(unsigned int *S1, unsigned int* S2)
             *S1 = strtoul(tok, NULL, 10);
             if (errno == EINVAL || errno == ERANGE)
             {
-                fprintf(stderr, "parseS: strtoul: %d", errno);
+                DIR_PERROR("parseS, strtoul");
                 free(buf1);
                 free(buf2);
-                return 0;
+                return -1;
             }
+
+            // TODO: debug printf S1
         }
         else
             tok = strtok(NULL, " ");
     }
     free(buf1);
 
+    // Parse variable S2 from line read
     tok = strtok(buf2, " ");
     while (tok != NULL)
     {
@@ -110,32 +123,31 @@ static unsigned int parseS(unsigned int *S1, unsigned int* S2)
             *S2 = strtoul(tok, NULL, 10);
             if (errno == EINVAL || errno == ERANGE)
             {
-                fprintf(stderr, "parseS: strtoul: %d", errno);
+                DIR_PERROR("parseS, strtoul");
                 free(buf2);
-                return 0;
+                return -1;
             }
+
+            // TODO: debug printf S2
         }
         else
             tok = strtok(NULL, " ");
     }
     free(buf2);
 
-    if (DEBUG)
-        printf("S1: %d, S2: %d\n", *S1, *S2);
-
-    return 1;
+    return 0;
 }
 
-/* Start a new Cashier thread. Return 0 on success,
-    -1 otherwise */
+/* Start a new Cashier thread. 
+    Return 0 on success, -1 otherwise */
 static int openCashier(Cashier_t *ca)
 {
-    int ret;
     pthread_t thCa;
+    int ret;
 
     if (ca == NULL)
     {
-        perror("openCashier: ca is NULL");
+        DIR_PERROR("openCashier, ca is NULL");
         return -1;
     }
 
@@ -146,12 +158,12 @@ static int openCashier(Cashier_t *ca)
     ret = pthread_create(&thCa, NULL, CashierP, ca);
     if (ret != 0)
     {
-        perror("openCashier: pthread_create");
+        DIR_PERROR("openCashier, pthread_create");
         return -1;
     }
     if (pthread_detach(thCa) != 0)
     {
-        perror("openCashier: pthread_detach");
+        DIR_PERROR("openCashier, pthread_detach");
         return -1;
     }
 
@@ -160,23 +172,30 @@ static int openCashier(Cashier_t *ca)
 
 int main(int argc, char *argv[])
 {
-    int sfd = -1, csfd = -1, optval, sigrecv = 0, ret, pid;
+    // Command line arguments
+    unsigned int K, C, E, T, S;
+
+    // Configuration file variables
+    unsigned int S1 = 0, S2 = 0;
+
+    int ret; // return value
+    sigset_t set; // signal handler variable
+    int pid; // fork pid
+
+    int sfd = -1,
+        csfd = -1, optval, sigrecv = 0;
     char msg [2];
-    sigset_t set;
+    
     socklen_t optlen = sizeof(optval);
     struct timespec wait_signal;
 
-    unsigned int K, C, E, T, S;
-    unsigned int S1 = UINT_MAX, S2 = UINT_MAX, countS1, countS2;
+    unsigned int countS1, countS2;
     bool found = false;
     Cashier_t *closed_cashier = NULL;
 
-    if (pthread_mutex_init(&configAccess, NULL) != 0)
-    {
-        perror("director: pthread_mutex_init");
-        goto error;
-    }
+    struct sockaddr_un my_addr;
 
+    /* VARIABLE INITIALIZATION AND ARGUMENT PARSING */
     if (argc != 7)
     {
         fprintf(stdout, "Usage: %s <K> <C> <E> <T> <P> <S>\n", argv[0]);
@@ -198,26 +217,23 @@ int main(int argc, char *argv[])
 
     if (ret == 0)
     {
-        perror("director: error converting arguments");
+        DIR_PERROR("error converting arguments");
         exit(EXIT_FAILURE);
     }
 
     if (K <= 0 || C <= 0 || T <= 0 || S <= 0)
     {
-        fprintf(stderr, "Parameters should be greater than 0\n");
+        DIR_PRINTF("Parameters should be greater than 0");
         exit(EXIT_FAILURE);
     }
     if (!(E > 0 && E < C))
     {
-        fprintf(stderr, "E should be greater than 0 and lower than C \n");
+        DIR_PRINTF("E should be greater than 0 and lower than C");
         exit(EXIT_FAILURE);
     }
    
-    if (parseS(&S1, &S2) == 0)
-    {
-        perror("director: parseS");
-        goto error;
-    }
+    if (parseS(&S1, &S2) != 0)
+        exit(EXIT_FAILURE);
 
     // Setup signal handler 
     sigemptyset(&set);
@@ -226,14 +242,19 @@ int main(int argc, char *argv[])
     pthread_sigmask(SIG_SETMASK, &set, NULL);
 
     // Initialize variables
+    if (pthread_mutex_init(&configAccess, NULL) != 0)
+    {
+        DIR_PERROR("pthread_mutex_init");
+        goto error;
+    }
     if (pthread_mutex_init(&gateCustomers, NULL) != 0)
     {
-        perror("director: pthread_mutex_init");
+        DIR_PERROR("pthread_mutex_init");
         goto error;
     }
     if (pthread_cond_init(&exitCustomers, NULL) != 0)
     {
-        perror("director: pthread_cond_init");
+        DIR_PERROR("pthread_cond_init");
         goto error;
     }
 
@@ -241,19 +262,19 @@ int main(int argc, char *argv[])
     gateClosed = true;
     pthread_mutex_unlock(&gateCustomers);
 
-    // Execute Supermarket
+    /* EXECUTE SUPERMARKET */
     pid = fork();
     if (pid == 0)
     {
         if (execve(SUPMRKT_EXEC_PATH, argv, NULL) == -1)
         {
-            perror("director: execve");
+            DIR_PERROR("execve");
             exit(EXIT_FAILURE);
         }
         exit(EXIT_SUCCESS);
     }
 
-    // Create the socket to communicate with supermarket process
+    /* CREATE SOCKET TO COMMUNICATE WITH SUPERMARKET */
     sfd = socket(AF_UNIX, SOCK_STREAM, 0); // ip protocol
     if (sfd == -1)
     {
@@ -269,10 +290,22 @@ int main(int argc, char *argv[])
         goto error;
     }
 
-    // Bind and wait for a connection with the client
-    if (bind(sfd, NULL, 0) == -1)
+    if (DEBUG)
+        printf("Before bind..\n");
+
+    my_addr.sun_family = AF_UNIX;
+    if (strlen(SOCKET_FILENAME) < 108)
+        strncpy(my_addr.sun_path, SOCKET_FILENAME, strlen(SOCKET_FILENAME)+1);
+    else
     {
-        perror("director: bind"); // INVALID ARGUMENT [TO FIX]
+        fprintf(stderr, "Socket filename too large");
+        goto error;
+    }
+
+    // Bind and wait for a connection with the client
+    if (bind(sfd, (struct sockaddr*)&my_addr, sizeof(my_addr)) == -1)
+    {
+        perror("director: bind");
         goto error;
     }
     if (listen(sfd, 1) == -1)
@@ -423,8 +456,10 @@ error:
     // close supermarket
     //kill(pid, SIGKILL);
 
-    if (DEBUG)
-        printf("Closing Director...\n");
+
+    // TODO: destroy configAccess, gateCustomers, exitCustomers
+
+    // TODO: debug print director is exiting
 
     close(sfd);
     return -1;
