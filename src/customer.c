@@ -11,6 +11,8 @@
 #include "supermarket.h"
 #include "director.h"
 
+// TODO: check the entire file
+
 /* Write customer's statistics on log file.
     Return 0 on success, -1 otherwise. */
 static int writeLogCustomer(unsigned int nQueue, unsigned int nProd, 

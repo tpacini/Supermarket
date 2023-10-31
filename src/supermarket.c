@@ -14,6 +14,8 @@
 #include "supermarket.h"
 #include "glob.h"
 
+// TODO: check the entire file
+
 #define SIGHUP_STR "1"
 #define SIGQUIT_STR "3"
 #define SIGTERM 15

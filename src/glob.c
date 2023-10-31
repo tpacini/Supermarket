@@ -6,6 +6,8 @@
 
 #include "glob.h"
 
+// TODO: check the entire file
+
 struct timespec diff(struct timespec start, struct timespec end)
 {
     struct timespec temp;

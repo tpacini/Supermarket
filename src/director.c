@@ -13,6 +13,7 @@
 #include "glob.h"
 #include "supermarket.h"
 #include "lib/printer.h"
+#include "lib/logger.h"
 
 pthread_mutex_t configAccess;
 Cashier_t **cashiers;
@@ -23,6 +24,9 @@ static int parseS(unsigned int *S1, unsigned int* S2)
 {
     FILE* fp;
     char *buf1, *buf2, *tok;
+    char debug_str[50];
+
+    memset(debug_str, 0, sizeof(debug_str));
 
     buf1 = (char*) malloc(MAX_LINE * sizeof(char));
     buf2 = (char*) malloc(MAX_LINE * sizeof(char));
@@ -61,7 +65,7 @@ static int parseS(unsigned int *S1, unsigned int* S2)
         return -1;
     }
 
-    // TODO: debug print buf1
+    DIR_LOG_DEBUG(buf1);
 
     // Read fourth line
     if (fseek(fp, 3L, SEEK_SET) == -1)
@@ -81,7 +85,7 @@ static int parseS(unsigned int *S1, unsigned int* S2)
         return -1;
     }
 
-    // TODO: debug print buf2
+    DIR_LOG_DEBUG(buf2);
 
     fclose(fp);
     pthread_mutex_unlock(&configAccess);
@@ -104,7 +108,8 @@ static int parseS(unsigned int *S1, unsigned int* S2)
                 return -1;
             }
 
-            // TODO: debug printf S1
+            sprintf(debug_str, "S1: %u", *S1);
+            DIR_LOG_DEBUG(debug_str);
         }
         else
             tok = strtok(NULL, " ");
@@ -128,7 +133,8 @@ static int parseS(unsigned int *S1, unsigned int* S2)
                 return -1;
             }
 
-            // TODO: debug printf S2
+            sprintf(debug_str, "S2: %u", *S2);
+            DIR_LOG_DEBUG(debug_str);
         }
         else
             tok = strtok(NULL, " ");
@@ -356,7 +362,7 @@ int main(int argc, char *argv[])
     name.sun_family = AF_UNIX;
     strncpy(name.sun_path, SOCKET_FILENAME, sizeof(name.sun_path) - 1);
 
-    // TODO: debug: print socket name.sun_path
+    DIR_LOG_DEBUG(name.sun_path);
 
     // Keep alive to ensure no unlimited waiting on write/read
     optval = 1; // enable option
@@ -388,7 +394,7 @@ int main(int argc, char *argv[])
         goto error;
     }
 
-    // TODO: debug, "New connection arrived! Socket with the client opened."
+    DIR_LOG_DEBUG("New connection arrived! Socket with the client opened");
 
     /* Wait for a signal (BLOCKING) for 150 ms, repeatedly. If the timer        timeouts, execute the Director's routine (look for S1 and S2 parameters),
     otherwise if a signal arrives, notify the Supermarket process through
@@ -405,7 +411,7 @@ int main(int argc, char *argv[])
             // Timeout, no signal arrived
             if (sigrecv == -1 && errno == EAGAIN && cashiers != NULL)
             {
-                // TODO: debug "Check cashier situation"
+                DIR_LOG_DEBUG("Checking cashier situation");
 
                 ret = checkCashierSituation(S1, S2);
                 if (ret != 0)
@@ -419,8 +425,10 @@ int main(int argc, char *argv[])
         }
     }
 
-
-    // TODO: debug, "Received signal "sigrecv""
+    if (sigrecv == SIGHUP)
+        DIR_LOG_DEBUG("Received signal SIGHUP");
+    else
+        DIR_LOG_DEBUG("Received signal SIGQUIT");
 
     // Send signal received to supermarket
     sprintf(msg, "%d", sigrecv);
@@ -430,7 +438,7 @@ int main(int argc, char *argv[])
         goto error;
     }
 
-    // TODO: debug, "Message with signal sent to supermarket"
+    DIR_LOG_DEBUG("Signal sent to supermarket");
 
     // Wait that the supermarket closes
     while(true)
@@ -451,7 +459,9 @@ int main(int argc, char *argv[])
             sleep(1);
     }
 
-    // TODO: copy the variables freed or destroyed in error, here
+    pthread_mutex_destroy(&configAccess);
+    pthread_mutex_destroy(&gateCustomers);
+    pthread_cond_destroy(&exitCustomers);
 
     close(csfd);
     close(sfd);
@@ -474,7 +484,7 @@ error:
             {
                 if (write(csfd, msg, strlen(msg)) == -1 && errno == EPIPE)
                 {
-                    printf("Supermarket closed!\n");
+                    DIR_PRINTF("Supermarket closed!");
                     break;
                 }
                 else
@@ -487,7 +497,7 @@ error:
     pthread_mutex_destroy(&gateCustomers);
     pthread_cond_destroy(&exitCustomers);
 
-    // TODO: debug print director is exiting
+    DIR_LOG_DEBUG("Director is exiting...");
 
     close(sfd);
     close(csfd);
@@ -496,9 +506,9 @@ error:
 
 
 // GLOBAL TODO
-// TODO: Continue checking code and replacing perror and printf
-// TODO: Implement logger debug/warn/fatal/...
 // TODO: Differentiate between fatal errors and warnings
+
+// man unix 7
 
 // Director should handle customers with zero products, how are they handled and where?
 

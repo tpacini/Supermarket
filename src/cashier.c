@@ -12,6 +12,8 @@
 #include "customer.h"
 #include "glob.h"
 
+// TODO: check the entire file
+
 /* Check if the cashiers is open (concurrent safe).
     Return true if it is open, false otherwise */
 static bool is_open (Cashier_t* ca)
