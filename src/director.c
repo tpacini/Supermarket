@@ -12,7 +12,6 @@
 #include "director.h"
 #include "glob.h"
 #include "supermarket.h"
-#include "lib/printer.h"
 #include "lib/logger.h"
 
 pthread_mutex_t configAccess;
@@ -32,7 +31,7 @@ static int parseS(unsigned int *S1, unsigned int* S2)
     buf2 = (char*) malloc(MAX_LINE * sizeof(char));
     if (buf1 == NULL || buf2 == NULL)
     {
-        DIR_PERROR("parseS, malloc");
+        MOD_PERROR("malloc");
         return -1;
     }
 
@@ -40,7 +39,7 @@ static int parseS(unsigned int *S1, unsigned int* S2)
     fp = fopen(CONFIG_FILENAME, "r");
     if (fp == NULL)
     {
-        DIR_PERROR("parseS, fopen");
+        MOD_PERROR("fopen");
         pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
@@ -50,7 +49,7 @@ static int parseS(unsigned int *S1, unsigned int* S2)
     // Read third line
     if (fseek(fp, 2L, SEEK_SET) == -1)
     {
-        DIR_PERROR("parseS, fseek");
+        MOD_PERROR("fseek");
         pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
@@ -58,19 +57,19 @@ static int parseS(unsigned int *S1, unsigned int* S2)
     }
     if (fread(buf1, sizeof(char), MAX_LINE, fp) == 0)
     {
-        DIR_PERROR("parseS, fread");
+        MOD_PERROR("fread");
         pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
         return -1;
     }
 
-    DIR_LOG_DEBUG(buf1);
+    LOG_DEBUG(buf1);
 
     // Read fourth line
     if (fseek(fp, 3L, SEEK_SET) == -1)
     {
-        DIR_PERROR("parseS, fseek");
+        MOD_PERROR("fseek");
         pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
@@ -78,14 +77,14 @@ static int parseS(unsigned int *S1, unsigned int* S2)
     }
     if (fread(buf2, sizeof(char), MAX_LINE, fp) == 0)
     {
-        DIR_PERROR("parseS, fread");
+        MOD_PERROR("fread");
         pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
         return -1;
     }
 
-    DIR_LOG_DEBUG(buf2);
+    LOG_DEBUG(buf2);
 
     fclose(fp);
     pthread_mutex_unlock(&configAccess);
@@ -102,14 +101,14 @@ static int parseS(unsigned int *S1, unsigned int* S2)
             *S1 = strtoul(tok, NULL, 10);
             if (errno == EINVAL || errno == ERANGE)
             {
-                DIR_PERROR("parseS, strtoul");
+                MOD_PERROR("strtoul");
                 free(buf1);
                 free(buf2);
                 return -1;
             }
 
             sprintf(debug_str, "S1: %u", *S1);
-            DIR_LOG_DEBUG(debug_str);
+            LOG_DEBUG(debug_str);
         }
         else
             tok = strtok(NULL, " ");
@@ -128,13 +127,13 @@ static int parseS(unsigned int *S1, unsigned int* S2)
             *S2 = strtoul(tok, NULL, 10);
             if (errno == EINVAL || errno == ERANGE)
             {
-                DIR_PERROR("parseS, strtoul");
+                MOD_PERROR("strtoul");
                 free(buf2);
                 return -1;
             }
 
             sprintf(debug_str, "S2: %u", *S2);
-            DIR_LOG_DEBUG(debug_str);
+            LOG_DEBUG(debug_str);
         }
         else
             tok = strtok(NULL, " ");
@@ -153,7 +152,7 @@ static int openCashier(Cashier_t *ca)
 
     if (ca == NULL)
     {
-        DIR_PERROR("openCashier, ca is NULL");
+        MOD_PERROR("ca is NULL");
         return -1;
     }
 
@@ -164,12 +163,12 @@ static int openCashier(Cashier_t *ca)
     ret = pthread_create(&thCa, NULL, CashierP, ca);
     if (ret != 0)
     {
-        DIR_PERROR("openCashier, pthread_create");
+        MOD_PERROR("pthread_create");
         return -1;
     }
     if (pthread_detach(thCa) != 0)
     {
-        DIR_PERROR("openCashier, pthread_detach");
+        MOD_PERROR("pthread_detach");
         return -1;
     }
 
@@ -292,18 +291,18 @@ int main(int argc, char *argv[])
 
     if (ret == 0)
     {
-        DIR_PERROR("error converting arguments");
+        MOD_PERROR("error converting arguments");
         exit(EXIT_FAILURE);
     }
 
     if (K <= 0 || C <= 0 || T <= 0 || S <= 0)
     {
-        DIR_PRINTF("Parameters should be greater than 0");
+        MOD_PRINTF("Parameters should be greater than 0");
         exit(EXIT_FAILURE);
     }
     if (!(E > 0 && E < C))
     {
-        DIR_PRINTF("E should be greater than 0 and lower than C");
+        MOD_PRINTF("E should be greater than 0 and lower than C");
         exit(EXIT_FAILURE);
     }
    
@@ -319,17 +318,17 @@ int main(int argc, char *argv[])
     // Initialize variables
     if (pthread_mutex_init(&configAccess, NULL) != 0)
     {
-        DIR_PERROR("pthread_mutex_init");
+        MOD_PERROR("pthread_mutex_init");
         goto error;
     }
     if (pthread_mutex_init(&gateCustomers, NULL) != 0)
     {
-        DIR_PERROR("pthread_mutex_init");
+        MOD_PERROR("pthread_mutex_init");
         goto error;
     }
     if (pthread_cond_init(&exitCustomers, NULL) != 0)
     {
-        DIR_PERROR("pthread_cond_init");
+        MOD_PERROR("pthread_cond_init");
         goto error;
     }
 
@@ -343,7 +342,7 @@ int main(int argc, char *argv[])
     {
         if (execve(SUPMRKT_EXEC_PATH, argv, NULL) == -1)
         {
-            DIR_PERROR("execve");
+            MOD_PERROR("execve");
             exit(EXIT_FAILURE);
         }
         exit(EXIT_SUCCESS);
@@ -353,7 +352,7 @@ int main(int argc, char *argv[])
     sfd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
     if (sfd == -1)
     {
-        DIR_PERROR("socket");
+        MOD_PERROR("socket");
         goto error;
     }
 
@@ -362,27 +361,27 @@ int main(int argc, char *argv[])
     name.sun_family = AF_UNIX;
     strncpy(name.sun_path, SOCKET_FILENAME, sizeof(name.sun_path) - 1);
 
-    DIR_LOG_DEBUG(name.sun_path);
+    LOG_DEBUG(name.sun_path);
 
     // Keep alive to ensure no unlimited waiting on write/read
     optval = 1; // enable option
     if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0) // TODO: check if setsockopt is needed
     {
-        DIR_PERROR("setsockopt");
+        MOD_PERROR("setsockopt");
         goto error;
     }
 
     // Bind socket to socket name
     if (bind(sfd, (const struct sockaddr*)&name, sizeof(name)) == -1)
     {
-        DIR_PERROR("bind");
+        MOD_PERROR("bind");
         goto error;
     }
 
     // Prepare for accepting connection
     if (listen(sfd, 1) == -1)
     {
-        DIR_PERROR("listen");
+        MOD_PERROR("listen");
         goto error;
     }
 
@@ -390,11 +389,11 @@ int main(int argc, char *argv[])
     csfd = accept(sfd, NULL, NULL);
     if (csfd == -1)
     {
-        DIR_PERROR("accept");
+        MOD_PERROR("accept");
         goto error;
     }
 
-    DIR_LOG_DEBUG("New connection arrived! Socket with the client opened");
+    LOG_DEBUG("New connection arrived! Socket with the client opened");
 
     /* Wait for a signal (BLOCKING) for 150 ms, repeatedly. If the timer        timeouts, execute the Director's routine (look for S1 and S2 parameters),
     otherwise if a signal arrives, notify the Supermarket process through
@@ -411,7 +410,7 @@ int main(int argc, char *argv[])
             // Timeout, no signal arrived
             if (sigrecv == -1 && errno == EAGAIN && cashiers != NULL)
             {
-                DIR_LOG_DEBUG("Checking cashier situation");
+                LOG_DEBUG("Checking cashier situation");
 
                 ret = checkCashierSituation(S1, S2);
                 if (ret != 0)
@@ -419,26 +418,30 @@ int main(int argc, char *argv[])
             }
             else
             {
-                DIR_PERROR("sigtimedwait");
+                MOD_PERROR("sigtimedwait");
                 goto error;
             }
         }
     }
 
     if (sigrecv == SIGHUP)
-        DIR_LOG_DEBUG("Received signal SIGHUP");
+    {
+        LOG_DEBUG("Received signal SIGHUP");
+    }
     else
-        DIR_LOG_DEBUG("Received signal SIGQUIT");
+    {
+        LOG_DEBUG("Received signal SIGQUIT");
+    }
 
     // Send signal received to supermarket
     sprintf(msg, "%d", sigrecv);
     if (write(csfd, msg, sizeof(msg)) == -1)
     {
-        DIR_PERROR("write");
+        MOD_PERROR("write");
         goto error;
     }
 
-    DIR_LOG_DEBUG("Signal sent to supermarket");
+    LOG_DEBUG("Signal sent to supermarket");
 
     // Wait that the supermarket closes
     while(true)
@@ -447,12 +450,12 @@ int main(int argc, char *argv[])
         ret = write(csfd, msg, sizeof(msg));
         if (ret == -1 && errno == EPIPE)
         {
-            DIR_PRINTF("Supermarket closed!\n");
+            MOD_PRINTF("Supermarket closed!\n");
             break;
         }
         else if (ret == -1)
         {
-            DIR_PERROR("write, wait supermarket close");
+            MOD_PERROR("write, wait supermarket close");
             goto error;
         }
         else
@@ -475,7 +478,7 @@ error:
         sprintf(msg, "%d", SIGQUIT);
         if (write(csfd, msg, sizeof(msg)) == -1)
         {
-            DIR_PERROR("write, error branch");
+            MOD_PERROR("write, error branch");
         }
         else
         {
@@ -484,7 +487,7 @@ error:
             {
                 if (write(csfd, msg, strlen(msg)) == -1 && errno == EPIPE)
                 {
-                    DIR_PRINTF("Supermarket closed!");
+                    MOD_PRINTF("Supermarket closed!");
                     break;
                 }
                 else
@@ -497,7 +500,7 @@ error:
     pthread_mutex_destroy(&gateCustomers);
     pthread_cond_destroy(&exitCustomers);
 
-    DIR_LOG_DEBUG("Director is exiting...");
+    LOG_DEBUG("Director is exiting...");
 
     close(sfd);
     close(csfd);

@@ -13,8 +13,10 @@
 
 #include "supermarket.h"
 #include "glob.h"
+#include "lib/logger.h"
+#include "lib/printer.h"
 
-// TODO: check the entire file
+
 
 #define SIGHUP_STR "1"
 #define SIGQUIT_STR "3"
@@ -31,16 +33,21 @@ pthread_mutex_t numCu;
 
 pthread_mutex_t configAccess;
 
+/* Retrieve number of cashiers to open at startup, from the
+    config file. Return number of first cashiers, 0 for errors. */
 unsigned int parseNfc()
 {
     FILE *fp;
     char *tok, *buf;
     unsigned int nfc = 0;
+    char debug_str[50];
+
+    memset(debug_str, 0, sizeof(debug_str));
 
     buf = (char *)malloc(MAX_LINE * sizeof(char));
     if (buf == NULL)
     {
-        perror("parseNfc: malloc");
+        MOD_PERROR("malloc");
         return 0;
     }
 
@@ -48,16 +55,17 @@ unsigned int parseNfc()
     fp = fopen(CONFIG_FILENAME, "r");
     if (fp == NULL)
     {
-        perror("parseNfc: fopen");
         pthread_mutex_unlock(&configAccess);
+        MOD_PERROR("fopen");
         free(buf);
         return 0;
     }
+
     // Second row
     if (fseek(fp, 1L, SEEK_SET) == -1)
     {
-        perror("parseNfc: fseek");
         pthread_mutex_unlock(&configAccess);
+        MOD_PERROR("fseek");
         fclose(fp);
         free(buf);
         return 0;
@@ -65,13 +73,14 @@ unsigned int parseNfc()
 
     if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
     {
-        perror("parseNfc: fread");
         pthread_mutex_unlock(&configAccess);
+        MOD_PERROR("fread");
         fclose(fp);
         free(buf);
         return 0;
     }
     fclose(fp);
+    pthread_mutex_unlock(&configAccess);
 
     tok = strtok(buf, " ");
     while (tok != NULL)
@@ -84,64 +93,62 @@ unsigned int parseNfc()
             nfc = strtoul(tok, NULL, 10);
             if (errno == EINVAL || errno == ERANGE)
             {
-                fprintf(stderr, "parseNfc: strtoul: %d", errno);
-                pthread_mutex_unlock(&configAccess);
+                MOD_PERROR("strtoul");
                 free(buf);
                 return 0;
             }
             if (nfc > K)
             {
-                perror("parseNfc: number of initial cashiers should be higher \
-                        than 0 and lower than K");
-                pthread_mutex_unlock(&configAccess);
+                MOD_PERROR("0 < nfc < K");
                 free(buf);
                 return 0;
             }
+
+            sprintf(debug_str, "nfc:%d", nfc);
+            LOG_DEBUG(debug_str);
         }
         else
             tok = strtok(NULL, " ");
     }
-
     free(buf);
-    pthread_mutex_unlock(&configAccess);
-
-    if (DEBUG)
-        printf("nfc: %d", nfc);
 
     return nfc;
 }
 
+/* Write inside the log file the number of products processed, the number
+   of customers served, time open, number of time close and mean service time.
+   Return 0 if success, -1 for errors. */
 int writeLogSupermarket()
 {
     char *logMsg;
     unsigned int to, mst;
     FILE* fp;
 
-    // No need to mutex, all the threads terminated
+    // No mutex needed, all the threads terminated
     fp = fopen(LOG_FILENAME, "a");
     if (fp == NULL)
     {
-        perror("writeLogSupermarket: fopen");
+        MOD_PERROR("fopen");
         return -1;
     }
 
     // Write supermarket data
-    logMsg = (char *)malloc((10 * 2 + 2 + 1) * sizeof(char));
+    logMsg = (char *) malloc((10 * 2 + 2 + 1) * sizeof(char));
     if (logMsg == NULL)
     {
-        perror("writeLogSupermarket: malloc");
+        MOD_PERROR("malloc");
         fclose(fp);
         return -1;
     }
     sprintf(logMsg, "%10u %10u\n", totNCustomer, totNProd);
-    fwrite(logMsg, sizeof(char), strlen(logMsg), fp);
+    fwrite(logMsg, sizeof(char), sizeof(logMsg), fp);
     free(logMsg);
 
     // Write cashier's data
-    logMsg = (char *)malloc((10 * 5 + 5 + 1) * sizeof(char));
+    logMsg = (char *) malloc((10 * 5 + 5 + 1) * sizeof(char));
     if (logMsg == NULL)
     {
-        perror("writeLogSupermarket: malloc");
+        MOD_PERROR("malloc");
         fclose(fp);
         return -1;
     }
@@ -158,7 +165,7 @@ int writeLogSupermarket()
         sprintf(logMsg, "%10u %10u %10u %10u %10u\n", cashiers[i]->totNProds, 
                     cashiers[i]->totNCustomer, to, 
                     cashiers[i]->nClose, mst);
-        fwrite(logMsg, sizeof(char), strlen(logMsg), fp);
+        fwrite(logMsg, sizeof(char), sizeof(logMsg), fp);
     }
 
     free(logMsg);
@@ -167,6 +174,8 @@ int writeLogSupermarket()
     return 0;
 }
 
+/* Wait until all customers exited.
+    Return 0 if success, -1 for errors. */
 int waitCustomerTerm()
 {
     unsigned int c = 0;
@@ -188,7 +197,7 @@ int waitCustomerTerm()
         {
             if (nanosleep(&timeout, NULL) != 0)
             {
-                perror("waitCustomerTerm: nanosleep");
+                MOD_PERROR("nanosleep");
                 return -1;
             }
         }
@@ -197,6 +206,9 @@ int waitCustomerTerm()
     return 0;
 }
 
+/* Wait until there are no more customers waiting to be served,
+    and then push a null customer to make the cashier terminate.
+    Return 0 if success, -1 for errors. */
 int waitCashierTerm()
 {
     int empty = 0;
@@ -226,7 +238,7 @@ int waitCashierTerm()
             {
                 if (nanosleep(&timeout, NULL) != 0)
                 {
-                    perror("waitCashierTerm: nanosleep");
+                    MOD_PERROR("nanosleep");
                     return -1;
                 }
             }
@@ -238,6 +250,9 @@ int waitCashierTerm()
     return 0;
 }
 
+/* Check the number of customers inside the supermarket and if
+    less than C-E, it will start E customer threads.
+    Return 0 if success, -1 for errors. */
 int enterCustomers()
 {
     int ret, index = 0, running;
@@ -249,6 +264,9 @@ int enterCustomers()
         pthread_mutex_lock(&numCu);
         currentNCustomer += E;
         pthread_mutex_lock(&numCu);
+
+        // FIXME: can me improved, only inner loop and using a variable for
+        // the number of customers started, look careful at mutex use, ?lock all?
         for (int i = 0; i < E; i++)
         {
             pthread_t thCu;
@@ -280,19 +298,19 @@ int enterCustomers()
 
             if (c == NULL)
             {
-                perror("enterCustomers: no free structure found.");
+                LOG_ERROR("no free structure found.");
                 return -1;
             }
 
             ret = pthread_create(&thCu, NULL, (void*)CustomerP, c);
             if (ret != 0)
             {
-                perror("enterCustomers: pthread_create");
+                MOD_PERROR("pthread_create");
                 return -1;
             }
             if (pthread_detach(thCu) != 0)
             {
-                perror("enterCustomers: pthread_detach");
+                MOD_PERROR("pthread_detach");
                 return -1;
             }
         }
@@ -300,6 +318,8 @@ int enterCustomers()
 
     return 0;
 }
+
+// TODO: check the entire file from here, clear .h file and import comments
 
 int main(int argc, char* argv[])
 {
