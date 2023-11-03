@@ -14,7 +14,6 @@
 #include "supermarket.h"
 #include "glob.h"
 #include "lib/logger.h"
-#include "lib/printer.h"
 
 
 
@@ -35,7 +34,7 @@ pthread_mutex_t configAccess;
 
 /* Retrieve number of cashiers to open at startup, from the
     config file. Return number of first cashiers, 0 for errors. */
-unsigned int parseNfc()
+static unsigned int parseNfc()
 {
     FILE *fp;
     char *tok, *buf;
@@ -118,7 +117,7 @@ unsigned int parseNfc()
 /* Write inside the log file the number of products processed, the number
    of customers served, time open, number of time close and mean service time.
    Return 0 if success, -1 for errors. */
-int writeLogSupermarket()
+static int writeLogSupermarket()
 {
     char *logMsg;
     unsigned int to, mst;
@@ -176,7 +175,7 @@ int writeLogSupermarket()
 
 /* Wait until all customers exited.
     Return 0 if success, -1 for errors. */
-int waitCustomerTerm()
+static int waitCustomerTerm()
 {
     unsigned int c = 0;
     struct timespec timeout;
@@ -209,7 +208,7 @@ int waitCustomerTerm()
 /* Wait until there are no more customers waiting to be served,
     and then push a null customer to make the cashier terminate.
     Return 0 if success, -1 for errors. */
-int waitCashierTerm()
+static int waitCashierTerm()
 {
     int empty = 0;
     void* nullCu = NULL;
@@ -253,7 +252,7 @@ int waitCashierTerm()
 /* Check the number of customers inside the supermarket and if
     less than C-E, it will start E customer threads.
     Return 0 if success, -1 for errors. */
-int enterCustomers()
+static int enterCustomers()
 {
     int ret, index = 0, running;
     Customer_t *c = NULL;
@@ -319,27 +318,29 @@ int enterCustomers()
     return 0;
 }
 
-// TODO: check the entire file from here, clear .h file and import comments
-
 int main(int argc, char* argv[])
 {
-    char* buf = NULL;
-    int sfd, ret;
-    unsigned int nFirstCashier;  // number of cashier to start at time 0
-
-    /* Variables for "select" */
+    /* "select" variables */
     fd_set s;
     struct timeval timeout;
 
+    /* Socket variables*/
     struct sockaddr_un dir_addr;
+    int sfd;
+
+    /* General variables */
+    char *buf = NULL;
+    int ret;
+    unsigned int nFirstCashier; // number of cashier to start at time 0
 
     currentNCustomer = 0;
     totNCustomer = 0;
     totNProd = 0;
+
     if (pthread_mutex_init(&numCu, NULL) != 0 ||
         pthread_mutex_init(&logAccess, NULL) != 0)
     {
-        perror("supermarket: pthread_mutex_init");
+        MOD_PERROR("pthread_mutex_init");
         goto error;
     }
 
@@ -366,18 +367,18 @@ int main(int argc, char* argv[])
 
     if (ret == 0)
     {
-        perror("supermarket: error converting arguments");
+        MOD_PERROR("error converting arguments");
         goto error;
     }
 
     if (K <= 0 || C <= 0 || T <= 0 || S <= 0 || P <= 0)
     {
-        fprintf(stderr, "Parameters should be greater than 0\n");
+        LOG_ERROR("Parameters should be greater than 0");
         exit(EXIT_FAILURE);
     }
     if (!(E > 0 && E < C))
     {
-        fprintf(stderr, "E should be greater than 0 and lower than C \n");
+        LOG_ERROR("E should be greater than 0 and lower than C");
         exit(EXIT_FAILURE);
     }
 
@@ -385,7 +386,7 @@ int main(int argc, char* argv[])
     nFirstCashier = parseNfc();
     if (nFirstCashier == 0)
     {
-        perror("supermarket: parseNfc");
+        MOD_PERROR("parseNfc");
         goto error;
     }
 
@@ -397,14 +398,15 @@ int main(int argc, char* argv[])
     cashiers = (Cashier_t**) malloc(K*sizeof(Cashier_t*));
     if (cashiers == NULL)
     {
-        perror("supermarket: malloc");
+        MOD_PERROR("malloc");
         goto error;
     }
+
     for (int i = 0; i < K; i++)
     {
-        if(init_cashier(cashiers[i]) == -1)
+        if(init_cashier(cashiers[i]) != 0)
         {
-            perror("supermarket: init_cashier");
+            MOD_PERROR("init_cashier");
             goto error;
         }
     }
@@ -420,12 +422,12 @@ int main(int argc, char* argv[])
         ret = pthread_create(&thCa, NULL, CashierP, cashiers[i]);
         if (ret != 0)
         {
-            perror("supermarket: pthread_create");
+            MOD_PERROR("pthread_create");
             goto error;
         }
         if (pthread_detach(thCa) != 0)
         {
-            perror("supermarket: pthread_detach");
+            MOD_PERROR("pthread_detach");
             goto error;
         }
     }
@@ -434,14 +436,15 @@ int main(int argc, char* argv[])
     customers = (Customer_t **)malloc(C * sizeof(Customer_t *));
     if (customers == NULL)
     {
-        perror("supermarket: malloc");
+        MOD_PERROR("malloc");
         goto error;
     }
+
     for (int i = 0; i < C; i++)
     {
         if (init_customer(customers[i]) == -1)
         {
-            perror("supermarket: init_customer");
+            MOD_PERROR("init_customer");
             goto error;
         }
     }
@@ -461,50 +464,46 @@ int main(int argc, char* argv[])
         ret = pthread_create(&thCu, NULL, CustomerP, customers[i]);
         if (ret != 0)
         {
-            perror("supermarket: pthread_create");
+            MOD_PERROR("pthread_create");
             goto error;
         }
         if (pthread_detach(thCu) != 0)
         {
-            perror("supermarket: pthread_detach");
+            MOD_PERROR("pthread_detach");
             goto error;
         }
     }
 
-    if (DEBUG)
-        printf("Customers and Cashiers have been started.\n");
+    LOG_DEBUG("Customers and Cashiers have been started.");
 
-    // Handling SIGHUP or SIGQUIT from Director
-    sfd = socket(AF_UNIX, SOCK_STREAM, 0); // ip protocol
+    /* CREATE SOCKET TO COMMUNICATE WITH DIRECTOR */
+    sfd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
     if (sfd == -1)
     {
-        perror("supermarket: socket");
+        MOD_PERROR("socket");
         goto error;
     }
 
+    // Build the address
+    memset(&dir_addr, 0, sizeof(dir_addr));
     dir_addr.sun_family = AF_UNIX;
-    if (strlen(SOCKET_FILENAME) < 108)
-        strncpy(dir_addr.sun_path, SOCKET_FILENAME, strlen(SOCKET_FILENAME)+1);
-    else
-    {
-        fprintf(stderr, "Socket filename too large");
-        goto error;
-    }
+    strncpy(dir_addr.sun_path, SOCKET_FILENAME, sizeof(dir_addr.sun_path) - 1);
+    
+    LOG_DEBUG(dir_addr.sun_path);
 
     ret = connect(sfd, (struct sockaddr*)&dir_addr, 0);
     if (ret == -1)
     {
-        perror("supermarket: connect");
+        MOD_PERROR("connect");
         goto error;
     }
 
-    if (DEBUG)
-        printf("Connected to socket.\n");
+    LOG_DEBUG("Connected to socket");
 
     buf = (char*) malloc((strlen(SIGHUP_STR)+1)*sizeof(char));
     if (buf == NULL)
     {
-        perror("supermarket: malloc");
+        MOD_PERROR("malloc");
         goto error;
     }
 
@@ -519,7 +518,7 @@ int main(int argc, char* argv[])
         ret = select(sfd, &s, NULL, NULL, &timeout);
         if (ret == -1)
         {
-            perror("supermarket: select");
+            MOD_PERROR("select");
             goto error;
         }
         // timeout expired
@@ -528,7 +527,7 @@ int main(int argc, char* argv[])
             ret = enterCustomers();
             if (ret == -1)
             {
-                perror("supermarket: enterCustomers");
+                MOD_PERROR("enterCustomers");
                 goto error;
             }
         }
@@ -537,7 +536,7 @@ int main(int argc, char* argv[])
         {
             if (read(sfd, buf, strlen(SIGHUP_STR)) < 0)
             {
-                perror("supermarket: read");
+                MOD_PERROR("read");
                 goto error;
             }
             buf[strlen(SIGHUP_STR)] = '\0';
@@ -548,20 +547,17 @@ int main(int argc, char* argv[])
                 continue;
             }
 
-            close(sfd);
-
             // Terminate customers' threads
             if (strcmp(buf, SIGQUIT_STR) == 0)
             {
-                if (DEBUG)
-                    printf("Read SIGQUIT signal.\n");
+                LOG_DEBUG("Read SIGQUIT signal.");
 
                 for (int i = 0; i < C; i++)
                 {
                     ret = pthread_kill(customers[i]->id, SIGTERM);
                     if (ret != 0)
                     {
-                        perror("supermarket: pthread_kill");
+                        MOD_PERROR("pthread_kill");
                         goto error;
                     }
                     destroy_customer(customers[i]);
@@ -571,13 +567,12 @@ int main(int argc, char* argv[])
             }
             else // wait customer termination
             {
-                if (DEBUG)
-                    printf("Read SIGHUP signal.\n");
+                LOG_DEBUG("Read SIGHUP signal.");
                 
                 ret = waitCustomerTerm();
                 if (ret != 0)
                 {
-                    perror("supermarket: waitCustomerTerm");
+                    MOD_PERROR("waitCustomerTerm");
                     goto error;
                 }
             }
@@ -585,28 +580,25 @@ int main(int argc, char* argv[])
             break;
         }
     }
- 
     free(buf);
 
     ret = waitCashierTerm();
     if (ret != 0)
     {
-        perror("supermarket: waitCashierTerm");
+        MOD_PERROR("waitCashierTerm");
         goto error;
     }
 
-    if (DEBUG)
-        printf("Customers and Cashiers closed.\n");
+    LOG_DEBUG("Customers and Cashiers closed.");
         
     ret = writeLogSupermarket();
     if (ret != 0)
     {
-        perror("supermarket: writeLogSupermarket");
+        MOD_PERROR("writeLogSupermarket");
         goto error;
     }
 
-    if (DEBUG)
-        printf("Saved information to log.\n");
+    LOG_DEBUG("Saved information to log.");
     
 error:
     if (buf != NULL)
@@ -616,22 +608,31 @@ error:
     {
         for (int i = 0; i < K; i++)
         {
-            destroy_cashier(cashiers[i]);
+            destroy_cashier(cashiers[i]); // FIXME:
         }
 
         free(cashiers);
     }
 
     if (customers != NULL)
-        free(customers); 
+    {
+        for (int i = 0; i < C; i++)
+        {
+            ret = pthread_kill(customers[i]->id, SIGTERM);
+            destroy_customer(customers[i]);
+        }
+
+        free(customers);
+    }
+         
 
     // check all missing variables (also customers, cashiers,..)
     // TODO: NOTIFY DIRECTOR OF THE ERROR
-    // close socket if open
 
     // TODO: different seed for every thread which used rand_r
     // TODO: fix log data due to errors in project's requirements
 
-    if (DEBUG)
-        printf("Closing Supermarket...\n");
+    LOG_DEBUG("Closing Supermarket.");
+
+    close(sfd);
 }

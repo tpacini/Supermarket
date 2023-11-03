@@ -11,6 +11,7 @@
 #include "cashier.h"
 #include "customer.h"
 #include "glob.h"
+#include "lib/logger.h"
 
 // TODO: check the entire file
 
@@ -32,10 +33,10 @@ int init_cashier(Cashier_t *ca)
 {
     if (ca == NULL)
     {
-        ca = (Cashier_t *)malloc(sizeof(Cashier_t));
+        ca = (Cashier_t *) malloc(sizeof(Cashier_t));
         if (ca == NULL)
         {
-            perror("init_cashier: malloc");
+            MOD_PERROR("malloc");
             return -1;
         }
     }
@@ -44,7 +45,7 @@ int init_cashier(Cashier_t *ca)
     // --> length = C
     if ((ca->queueCustomers = initBQueue(C)) == NULL)
     {
-        perror("init_cashier: initBQueue");
+        MOD_PERROR("initBQueue");
         if (ca != NULL)
             free(ca);
         return -1;
@@ -54,7 +55,7 @@ int init_cashier(Cashier_t *ca)
         pthread_mutex_init(&ca->accessState, NULL) != 0 ||
         pthread_mutex_init(&ca->accessLogInfo, NULL) != 0)
     {
-        perror("init_cashier: pthread_mutex_init");
+        MOD_PERROR("pthread_mutex_init");
         return -1;
     }
 
@@ -77,7 +78,7 @@ int destroy_cashier(Cashier_t *ca)
         pthread_mutex_destroy(&ca->accessState) != 0 ||
         pthread_mutex_destroy(&ca->accessLogInfo) != 0)
     {
-        perror("init_cashier: pthread_mutex_destroy");
+        MOD_PERROR("pthread_mutex_destroy");
         free(ca);
         return -1;
     }
@@ -93,11 +94,12 @@ static unsigned int parseTimeProd()
     unsigned int timeProd;
     FILE* fp;
     char *buf, *tok;
+    char debug_str[50];
 
     buf = (char*) malloc(MAX_LINE * sizeof(char));
     if (buf == NULL)
     {
-        perror("parseTimeProd: malloc");
+        MOD_PERROR("malloc");
         return 0;
     }
 
@@ -105,23 +107,25 @@ static unsigned int parseTimeProd()
     fp = fopen(CONFIG_FILENAME, "r");
     if (fp == NULL)
     {
-        perror("parseTimeProd: fopen");
         pthread_mutex_unlock(&configAccess);
+        MOD_PERROR("fopen");
         free(buf);
         return 0;
     }
 
     if (fseek(fp, 0L, SEEK_SET) == -1)
     {
-        perror("parseTimeProd: fseek");
         pthread_mutex_unlock(&configAccess);
+        MOD_PERROR("fseek");
+        fclose(fp);
         free(buf);
         return 0;
     }
     if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
     {
-        perror("parseTimeProd: fread");
         pthread_mutex_unlock(&configAccess);
+        MOD_PERROR("fread");
+        fclose(fp);
         free(buf);
         return 0;
     }
@@ -139,17 +143,19 @@ static unsigned int parseTimeProd()
             timeProd = strtoul(tok, NULL, 10);
             if (errno == EINVAL || errno == ERANGE)
             {
-                fprintf(stderr, "parseTimeProd: strtoul: %d", errno);
+                MOD_PERROR("strtoul");
                 free(buf);
                 return 0;
             }
             if (timeProd > PROD_THRESH)
             {
-                perror("parseTimeProd: time to process single product NULL or \
-                        too large");
+                LOG_ERROR("timeProd should not be NULL or too large");
                 free(buf);
                 return 0;
             }
+
+            sprintf(debug_str, "timeProd: %d", timeProd);
+            LOG_DEBUG(debug_str);
         }
         else
             tok = strtok(NULL, " ");
@@ -161,25 +167,27 @@ static unsigned int parseTimeProd()
 
 void* CashierP(void *c)
 {
-    unsigned int nProd;
-    struct timespec ts_pTime, ts_tot;
-    struct timespec ts_start, ts_end;
-    Customer_t *cu = NULL;
+    /* Log variables */
+    struct timespec ts_sTime; // service time
+    struct timespec ts_pTime; // time to process products
 
-    unsigned int procTime = rand() % (80 - 20 + 1) + 20;   // processing time
-    unsigned int timeProd = 1;                             // time to process single product
-    
-    struct timespec ts_sTime;
+    /* General variables */
+    unsigned int procTime = rand() % (80 - 20 + 1) + 20; // processing time
+    unsigned int timeProd;           // time to process single product
+    unsigned int nProd;              // number of products to process
+    Customer_t *cu = NULL;           // current customer pointer
+    Cashier_t *ca  = (Cashier_t *)c; // current cashier's data structure
+    struct timespec ts_start, ts_end, ts_tot;
+
+
     ts_sTime.tv_sec = 0;
     ts_sTime.tv_nsec = 0;
-
-    Cashier_t *ca = (Cashier_t*) c;
 
     // Retrieve parameter from configuration file
     timeProd = parseTimeProd();
     if (timeProd == 0)
     {
-        perror("CashierP: parseTimeProd");
+        MOD_PERROR("parseTimeProd");
         goto error;
     }
 
@@ -189,7 +197,7 @@ void* CashierP(void *c)
     // Start handling customers
     while(is_open(ca))   
     {
-        // Pop a customer
+        // Pop a customer from the queue
         pthread_mutex_lock(&ca->accessQueue);
         cu = pop(ca->queueCustomers);
         pthread_mutex_unlock(&ca->accessQueue);
@@ -231,24 +239,25 @@ void* CashierP(void *c)
 
     // Save information of current service
     pthread_mutex_lock(&ca->accessLogInfo);
-    ca->meanServiceTime = add_ts(ts_sTime, ca->meanServiceTime);
     if (ca->totNCustomer == 0)
     {
-        perror("CashierP: division by zero");
         pthread_mutex_unlock(&ca->accessLogInfo);
+        MOD_PERROR("division by zero");
         goto error;
     }
 
+    ca->meanServiceTime = add_ts(ca->meanServiceTime, ts_sTime);
     ca->meanServiceTime.tv_nsec = round(ca->meanServiceTime.tv_nsec \
                                             / ca->totNCustomer);
     ca->meanServiceTime.tv_sec = round(ca->meanServiceTime.tv_sec \
                                             / ca->totNCustomer);
 
-    ca->timeOpen = add_ts(ts_tot, ca->timeOpen);
+    ca->timeOpen = add_ts(ca->timeOpen, ts_tot);
     ca->nClose += 1;
     pthread_mutex_unlock(&ca->accessLogInfo);
 
 error:
 
+    // ca->nClose += 1
     pthread_exit(0);
 }
