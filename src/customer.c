@@ -179,13 +179,14 @@ void* CustomerP(void *c)
     // Did you have zero product? Notify director
     if (cu->nProd == 0)
     {
-        // TODO: waiting for implementation director's side
-        // pthread_mutex_lock(&gateCustomers);
-        // while (gateClosed)
-        //    pthread_cond_wait(&exitCustomers, &gateCustomers);
-        //
-        // gateClosed = true;
-        // pthread_mutex_unlock(&gateCustomers);
+        pthread_mutex_lock(&gateCustomers);
+        nCustomerWaiting += 1;
+        while (gateClosed)
+           pthread_cond_wait(&exitCustomers, &gateCustomers);
+    
+        gateClosed = true;
+        nCustomerWaiting -= 1;
+        pthread_mutex_unlock(&gateCustomers);
     }
     else
     {

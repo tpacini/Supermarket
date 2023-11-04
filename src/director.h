@@ -9,6 +9,7 @@
 /* Variables to handle customers with no products */
 pthread_cond_t exitCustomers;
 pthread_mutex_t gateCustomers;
+unsigned int nCustomerWaiting;
 bool gateClosed;
 
 #endif

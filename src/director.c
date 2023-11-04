@@ -309,6 +309,8 @@ int main(int argc, char *argv[])
     if (parseS(&S1, &S2) != 0)
         exit(EXIT_FAILURE);
 
+    nCustomerWaiting = 0;
+
     // Setup signal handler 
     sigemptyset(&set);
     sigaddset(&set, SIGQUIT);
@@ -415,6 +417,16 @@ int main(int argc, char *argv[])
                 ret = checkCashierSituation(S1, S2);
                 if (ret != 0)
                     goto error;
+
+                // Release waiting customers
+                do // FIXME: Director will be stuck here???
+                {
+                    pthread_mutex_lock(&gateCustomers);
+                    ret = nCustomerWaiting;
+                    gateClosed = false;
+                    pthread_cond_signal(&exitCustomers);
+                    pthread_mutex_unlock(&gateCustomers);
+                } while (ret != 0);
             }
             else
             {
