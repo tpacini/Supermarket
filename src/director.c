@@ -12,7 +12,7 @@
 #include "director.h"
 #include "glob.h"
 #include "supermarket.h"
-#include "lib/logger.h"
+#include "../lib/logger.h"
 
 pthread_mutex_t configAccess;
 Cashier_t **cashiers;
@@ -46,45 +46,49 @@ static int parseS(unsigned int *S1, unsigned int* S2)
         return -1;
     }
 
-    // Read third line
-    if (fseek(fp, 2L, SEEK_SET) == -1)
+    // first line
+    if(fgets(buf1, MAX_LINE, fp) == NULL)
     {
-        MOD_PERROR("fseek");
         pthread_mutex_unlock(&configAccess);
+        MOD_PERROR("fgets");
+        fclose(fp);
         free(buf1);
         free(buf2);
         return -1;
     }
-    if (fread(buf1, sizeof(char), MAX_LINE, fp) == 0)
+    // second line
+    if (fgets(buf1, MAX_LINE, fp) == NULL)
     {
-        MOD_PERROR("fread");
         pthread_mutex_unlock(&configAccess);
+        MOD_PERROR("fgets");
+        fclose(fp);
         free(buf1);
         free(buf2);
         return -1;
     }
 
-    LOG_DEBUG(buf1);
+    memset(buf1, 0, MAX_LINE);
+    // Read third line
+    if (fgets(buf1, MAX_LINE, fp) == 0)
+    {
+        pthread_mutex_unlock(&configAccess);
+        MOD_PERROR("fgets");
+        fclose(fp);
+        free(buf1);
+        free(buf2);
+        return -1;
+    }
 
     // Read fourth line
-    if (fseek(fp, 3L, SEEK_SET) == -1)
+    if (fgets(buf2, MAX_LINE, fp) == 0)
     {
-        MOD_PERROR("fseek");
         pthread_mutex_unlock(&configAccess);
+        MOD_PERROR("fgets");
+        fclose(fp);
         free(buf1);
         free(buf2);
         return -1;
     }
-    if (fread(buf2, sizeof(char), MAX_LINE, fp) == 0)
-    {
-        MOD_PERROR("fread");
-        pthread_mutex_unlock(&configAccess);
-        free(buf1);
-        free(buf2);
-        return -1;
-    }
-
-    LOG_DEBUG(buf2);
 
     fclose(fp);
     pthread_mutex_unlock(&configAccess);
@@ -107,7 +111,7 @@ static int parseS(unsigned int *S1, unsigned int* S2)
                 return -1;
             }
 
-            sprintf(debug_str, "S1: %u", *S1);
+            sprintf(debug_str, "parsed S1 is %u", *S1);
             LOG_DEBUG(debug_str);
         }
         else
@@ -132,7 +136,7 @@ static int parseS(unsigned int *S1, unsigned int* S2)
                 return -1;
             }
 
-            sprintf(debug_str, "S2: %u", *S2);
+            sprintf(debug_str, "parsed S2 is %u", *S2);
             LOG_DEBUG(debug_str);
         }
         else
@@ -178,7 +182,8 @@ static int openCashier(Cashier_t *ca)
 /* Check how many customers are queued in Cashiers' lines. Based
    on parameters S1 and S2, the Director will open or close some cashiers
    Return 0 on success, -1 otherwise */
-static int checkCashierSituation(unsigned int S1, unsigned int S2)
+static int checkCashierSituation(unsigned int S1, unsigned int S2, 
+                                    unsigned int K)
 {
     int ret;
     bool found = false;
@@ -244,6 +249,17 @@ static int checkCashierSituation(unsigned int S1, unsigned int S2)
     return 0;
 }
 
+/* Thread routine that handles supermarket startup.
+    No forck+execve to avoid duplicating parent memory */
+static void* supermarket_handler(void *argv)
+{
+    if (execve(SUPMRKT_EXEC_PATH, (char**)argv, NULL) == -1)
+    {
+        MOD_PERROR("execve");
+    }
+    pthread_exit(0);
+}
+
 int main(int argc, char *argv[])
 {
     // Command line arguments
@@ -254,7 +270,7 @@ int main(int argc, char *argv[])
 
     // Socket communication variables
     struct sockaddr_un name;
-    int sfd, csfd = -1;
+    int sfd = -1, csfd = -1;
     int optval;
     socklen_t optlen = sizeof(optval);
     char msg[2];
@@ -265,9 +281,8 @@ int main(int argc, char *argv[])
 
     // Other variables
     int ret;                        // return value
-    int pid;                        // fork pid
+    pthread_t thSu;                 // identifier for sup. handler
     struct timespec wait_signal;    // main loop waiting time
-
 
     /* VARIABLE INITIALIZATION AND ARGUMENT PARSING */
     if (argc != 7)
@@ -305,6 +320,8 @@ int main(int argc, char *argv[])
         MOD_PRINTF("E should be greater than 0 and lower than C");
         exit(EXIT_FAILURE);
     }
+
+    LOG_DEBUG("Command line arguments parsed.");
    
     if (parseS(&S1, &S2) != 0)
         exit(EXIT_FAILURE);
@@ -338,17 +355,8 @@ int main(int argc, char *argv[])
     gateClosed = true;
     pthread_mutex_unlock(&gateCustomers);
 
-    /* EXECUTE SUPERMARKET */
-    pid = fork();
-    if (pid == 0)
-    {
-        if (execve(SUPMRKT_EXEC_PATH, argv, NULL) == -1)
-        {
-            MOD_PERROR("execve");
-            exit(EXIT_FAILURE);
-        }
-        exit(EXIT_SUCCESS);
-    }
+    // Unlink socket file if already present
+    remove(SOCKET_FILENAME);
 
     /* CREATE SOCKET TO COMMUNICATE WITH SUPERMARKET PROCESS */
     sfd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
@@ -377,6 +385,16 @@ int main(int argc, char *argv[])
     if (bind(sfd, (const struct sockaddr*)&name, sizeof(name)) == -1)
     {
         MOD_PERROR("bind");
+        goto error;
+    }
+
+    LOG_DEBUG("Ready to accept connections.");
+
+    /* EXECUTE SUPERMARKET */
+    ret = pthread_create(&thSu, NULL, supermarket_handler, argv);
+    if (ret != 0)
+    {
+        MOD_PERROR("pthread_create");
         goto error;
     }
 
@@ -414,7 +432,7 @@ int main(int argc, char *argv[])
             {
                 LOG_DEBUG("Checking cashier situation");
 
-                ret = checkCashierSituation(S1, S2);
+                ret = checkCashierSituation(S1, S2, K);
                 if (ret != 0)
                     goto error;
 
@@ -478,6 +496,7 @@ int main(int argc, char *argv[])
     pthread_mutex_destroy(&gateCustomers);
     pthread_cond_destroy(&exitCustomers);
 
+    remove(SOCKET_FILENAME);
     close(csfd);
     close(sfd);
     return 0;
@@ -506,6 +525,7 @@ error:
                     sleep(1);
             }
         }
+        close(csfd);
     }
     
     pthread_mutex_destroy(&configAccess);
@@ -514,8 +534,11 @@ error:
 
     LOG_DEBUG("Director is exiting...");
 
-    close(sfd);
-    close(csfd);
+    remove(SOCKET_FILENAME);
+
+    if (sfd != -1)
+        close(sfd);
+    
     return -1;
 }
 

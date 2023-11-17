@@ -10,7 +10,7 @@
 #include "glob.h"
 #include "supermarket.h"
 #include "director.h"
-#include "lib/logger.h"
+#include "../lib/logger.h"
 
 /* Write customer's statistics on log file.
     Return 0 on success, -1 otherwise. */
@@ -95,16 +95,6 @@ static unsigned int chooseCashier (Cashier_t* currentCa)
 
 int init_customer(Customer_t *cu)
 {
-    if (cu == NULL)
-    {
-        cu = (Customer_t *) malloc(sizeof(Customer_t));
-        if (cu == NULL)
-        {
-            MOD_PERROR("malloc");
-            return -1;
-        }
-    }
-
     if (pthread_mutex_init(&cu->mutexC, NULL) != 0 ||
         pthread_mutex_init(&cu->accessState, NULL) != 0)
     {
@@ -165,7 +155,6 @@ void* CustomerP(void *c)
     unsigned int nQueue = 0;            // number of queues visited
     unsigned int timeToBuy;             // time to buy products
     unsigned int ret;                   // return value
-    bool skipCashier = false;           // flag: try another cashier
 
     timeToBuy = rand() % (T - 10 + 1) + 10;
 

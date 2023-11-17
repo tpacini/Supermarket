@@ -26,17 +26,19 @@ all: $(TARGETS)
 
 # target : prerequisites, following recipe
 # '@' before the command, to not print command
+lib/boundedqueue.o: lib/boundedqueue.c lib/boundedqueue.h
+
 supermarket: src/supermarket.o src/glob.o src/cashier.o src/customer.o lib/boundedqueue.o
 	$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 director: src/director.o src/glob.o
 	$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-lib/boundedqueue.o: lib/boundedqueue.c lib/boundedqueue.h
+
 
 
 clean:
-	@rm -f *.txt src/*.o lib/*.o lib/*.a
+	@rm -f src/*.o lib/*.o lib/*.a
 	@rm -f director supermarket
 
 test1:
@@ -46,10 +48,10 @@ test1:
 	@echo "Done!"
 
 test2:
-	@chmod +x analisi.sh
 	@./director 6 50 3 200 100 20 & 
 	@sleep 25
 	@killall -s SIGHUP director
-
+	@echo "Done!"
+# @chmod +x analisi.sh
 # @./analisi.sh
 

@@ -2,4 +2,3 @@ time processing single product : 2
 initial cashiers number : 1
 S1 : 2
 S2 : 5
-log filename: log.txt

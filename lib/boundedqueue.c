@@ -7,10 +7,8 @@
 
 /**
  * @file boundedqueue.c
- * @brief File di implementazione dell'interfaccia per la coda di dimensione finita
+ * @brief Implementation of fixed length queue for multi-threaded applications
  */
-
-/* ------------------- funzioni di utilita' -------------------- */
 
 static inline void LockQueue(BQueue_t *q) { pthread_mutex_lock(&q->m); }
 static inline void UnlockQueue(BQueue_t *q) { pthread_mutex_unlock(&q->m); }
@@ -18,8 +16,6 @@ static inline void WaitToProduce(BQueue_t *q) { pthread_cond_wait(&q->cfull, &q-
 static inline void WaitToConsume(BQueue_t *q) { pthread_cond_wait(&q->cempty, &q->m); }
 static inline void SignalProducer(BQueue_t *q) { pthread_cond_signal(&q->cfull); }
 static inline void SignalConsumer(BQueue_t *q) { pthread_cond_signal(&q->cempty); }
-
-/* ------------------- interfaccia della coda ------------------ */
 
 BQueue_t *initBQueue(size_t n)
 {
@@ -29,12 +25,14 @@ BQueue_t *initBQueue(size_t n)
         perror("malloc");
         return NULL;
     }
+
     q->buf = calloc(sizeof(void *), n);
     if (!q->buf)
     {
         perror("malloc buf");
         goto error;
     }
+
     if (pthread_mutex_init(&q->m, NULL) != 0)
     {
         perror("pthread_mutex_init");
@@ -50,6 +48,7 @@ BQueue_t *initBQueue(size_t n)
         perror("pthread_cond_init empty");
         goto error;
     }
+
     q->head = q->tail = 0;
     q->qlen = 0;
     q->qsize = n;
@@ -109,9 +108,9 @@ int push(BQueue_t *q, void *data)
     q->buf[q->tail] = data;
     q->tail += (q->tail + 1 >= q->qsize) ? (1 - q->qsize) : 1;
     q->qlen += 1;
-    /* Invece di fare sempre la signal, si puo' contare il n. di 
-     * consumer in attesa e fare la signal solo se tale numero 
-     * e' > 0
+    /* Rather than continuously perform a signal, count number of waiting
+     * consumers and signal for that number of times, only if the number
+     * is greater than 0
      */
     SignalConsumer(q);
     UnlockQueue(q);

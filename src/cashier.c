@@ -11,7 +11,7 @@
 #include "cashier.h"
 #include "customer.h"
 #include "glob.h"
-#include "lib/logger.h"
+#include "../lib/logger.h"
 
 // TODO: check the entire file
 
@@ -31,19 +31,9 @@ static bool is_open (Cashier_t* ca)
 
 int init_cashier(Cashier_t *ca)
 {
-    if (ca == NULL)
-    {
-        ca = (Cashier_t *) malloc(sizeof(Cashier_t));
-        if (ca == NULL)
-        {
-            MOD_PERROR("malloc");
-            return -1;
-        }
-    }
-
-    // If all customers inside the supermarket are lined up here
-    // --> length = C
-    if ((ca->queueCustomers = initBQueue(C)) == NULL)
+    // Max length = C, all customers lined up here
+    ca->queueCustomers = initBQueue(C);
+    if (ca->queueCustomers == NULL)
     {
         MOD_PERROR("initBQueue");
         if (ca != NULL)
@@ -113,18 +103,10 @@ static unsigned int parseTimeProd()
         return 0;
     }
 
-    if (fseek(fp, 0L, SEEK_SET) == -1)
+    if (fgets(buf, MAX_LINE, fp) == 0)
     {
         pthread_mutex_unlock(&configAccess);
-        MOD_PERROR("fseek");
-        fclose(fp);
-        free(buf);
-        return 0;
-    }
-    if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
-    {
-        pthread_mutex_unlock(&configAccess);
-        MOD_PERROR("fread");
+        MOD_PERROR("fgets");
         fclose(fp);
         free(buf);
         return 0;
@@ -154,7 +136,7 @@ static unsigned int parseTimeProd()
                 return 0;
             }
 
-            sprintf(debug_str, "timeProd: %d", timeProd);
+            sprintf(debug_str, "timeProd is %d", timeProd);
             LOG_DEBUG(debug_str);
         }
         else
@@ -173,12 +155,11 @@ void* CashierP(void *c)
 
     /* General variables */
     unsigned int procTime = rand() % (80 - 20 + 1) + 20; // processing time
-    unsigned int timeProd;           // time to process single product
-    unsigned int nProd;              // number of products to process
-    Customer_t *cu = NULL;           // current customer pointer
-    Cashier_t *ca  = (Cashier_t *)c; // current cashier's data structure
+    unsigned int timeProd = 0;           // time to process single product
+    unsigned int nProd;                  // number of products to process
+    Customer_t *cu = NULL;               // current customer pointer
+    Cashier_t *ca  = (Cashier_t *)c;     // current cashier's data structure
     struct timespec ts_start, ts_end, ts_tot;
-
 
     ts_sTime.tv_sec = 0;
     ts_sTime.tv_nsec = 0;

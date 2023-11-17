@@ -13,7 +13,7 @@
 
 #include "supermarket.h"
 #include "glob.h"
-#include "lib/logger.h"
+#include "../lib/logger.h"
 
 
 
@@ -60,20 +60,22 @@ static unsigned int parseNfc()
         return 0;
     }
 
-    // Second row
-    if (fseek(fp, 1L, SEEK_SET) == -1)
+    // first line
+    if (fgets(buf, MAX_LINE, fp) == NULL)
     {
         pthread_mutex_unlock(&configAccess);
-        MOD_PERROR("fseek");
+        MOD_PERROR("fgets");
         fclose(fp);
         free(buf);
-        return 0;
+        return -1;
     }
 
-    if (fread(buf, sizeof(char), MAX_LINE, fp) == 0)
+    memset(buf, 0, MAX_LINE);
+    // Read second line
+    if (fgets(buf, MAX_LINE, fp) == 0)
     {
         pthread_mutex_unlock(&configAccess);
-        MOD_PERROR("fread");
+        MOD_PERROR("fgets");
         fclose(fp);
         free(buf);
         return 0;
@@ -103,8 +105,9 @@ static unsigned int parseNfc()
                 return 0;
             }
 
-            sprintf(debug_str, "nfc:%d", nfc);
+            sprintf(debug_str, "parsed nfc is %d", nfc);
             LOG_DEBUG(debug_str);
+            break;
         }
         else
             tok = strtok(NULL, " ");
@@ -326,12 +329,12 @@ int main(int argc, char* argv[])
 
     /* Socket variables*/
     struct sockaddr_un dir_addr;
-    int sfd;
+    int sfd = -1;
 
     /* General variables */
     char *buf = NULL;
     int ret;
-    unsigned int nFirstCashier; // number of cashier to start at time 0
+    unsigned int nFirstCashier = 0; // number of cashier to start at time 0
 
     currentNCustomer = 0;
     totNCustomer = 0;
@@ -382,6 +385,8 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
 
+    LOG_DEBUG("Command line arguments parsed.");
+
     // Parse nFirstCashier from config
     nFirstCashier = parseNfc();
     if (nFirstCashier == 0)
@@ -404,12 +409,21 @@ int main(int argc, char* argv[])
 
     for (int i = 0; i < K; i++)
     {
+        cashiers[i] = (Cashier_t *) malloc(sizeof(Cashier_t));
+        if (cashiers[i] == NULL)
+        {
+            MOD_PERROR("malloc");
+            return -1;
+        }
+        
         if(init_cashier(cashiers[i]) != 0)
         {
             MOD_PERROR("init_cashier");
             goto error;
         }
     }
+
+    LOG_DEBUG("Cashiers initialized.");
 
     // Start cashiers' threads
     for (int i = 0; i < nFirstCashier; i++)
@@ -418,19 +432,22 @@ int main(int argc, char* argv[])
         pthread_mutex_lock(&cashiers[i]->accessState);
         cashiers[i]->open = 1;
         pthread_mutex_unlock(&cashiers[i]->accessState);
-        
+
         ret = pthread_create(&thCa, NULL, CashierP, cashiers[i]);
         if (ret != 0)
         {
             MOD_PERROR("pthread_create");
             goto error;
         }
+        
         if (pthread_detach(thCa) != 0)
         {
             MOD_PERROR("pthread_detach");
             goto error;
         }
     }
+
+    LOG_DEBUG("Cashiers started.");
 
     // Initialize customers' data
     customers = (Customer_t **)malloc(C * sizeof(Customer_t *));
@@ -442,12 +459,21 @@ int main(int argc, char* argv[])
 
     for (int i = 0; i < C; i++)
     {
+        customers[i] = (Customer_t *)malloc(sizeof(Customer_t));
+        if (customers[i] == NULL)
+        {
+            MOD_PERROR("malloc");
+            return -1;
+        }
+
         if (init_customer(customers[i]) == -1)
         {
             MOD_PERROR("init_customer");
             goto error;
         }
     }
+
+    LOG_DEBUG("Customers initialized.");
 
     // Start customers' threads (C)
     pthread_mutex_lock(&numCu);
@@ -474,7 +500,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    LOG_DEBUG("Customers and Cashiers have been started.");
+    LOG_DEBUG("Customers started.");
 
     /* CREATE SOCKET TO COMMUNICATE WITH DIRECTOR */
     sfd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
@@ -491,7 +517,7 @@ int main(int argc, char* argv[])
     
     LOG_DEBUG(dir_addr.sun_path);
 
-    ret = connect(sfd, (struct sockaddr*)&dir_addr, 0);
+    ret = connect(sfd, (struct sockaddr*)&dir_addr, sizeof(dir_addr));
     if (ret == -1)
     {
         MOD_PERROR("connect");
@@ -507,15 +533,15 @@ int main(int argc, char* argv[])
         goto error;
     }
 
-    FD_ZERO(&s);
-    FD_SET(sfd, &s);
-
     timeout.tv_sec = 0;
     timeout.tv_usec = 100 * 1000; // 100 ms
 
     while (true)
     {
-        ret = select(sfd, &s, NULL, NULL, &timeout);
+        FD_ZERO(&s);
+        FD_SET(sfd, &s);
+
+        ret = select(sfd+1, &s, NULL, NULL, &timeout);
         if (ret == -1)
         {
             MOD_PERROR("select");
@@ -524,6 +550,8 @@ int main(int argc, char* argv[])
         // timeout expired
         else if (ret == 0)
         {
+            LOG_DEBUG("Check if new customers can enter.");
+
             ret = enterCustomers();
             if (ret == -1)
             {
@@ -534,6 +562,8 @@ int main(int argc, char* argv[])
         // read ready
         else
         {
+            LOG_DEBUG("Message received.");
+
             if (read(sfd, buf, strlen(SIGHUP_STR)) < 0)
             {
                 MOD_PERROR("read");

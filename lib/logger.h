@@ -5,7 +5,7 @@
 #ifdef IS_DEBUG
 #define LOG_DEBUG(s)                                                  \
     {                                                                 \
-        fprintf(stdout, "[DEBUG][%s,%d]: %s", __FILE__, __LINE__, s); \
+        fprintf(stdout, "[DEBUG][%s,%d]: %s\n", __FILE__, __LINE__, s); \
     }
 #else
 #define LOG_DEBUG(s)
@@ -13,18 +13,19 @@
 
 #define LOG_FATAL(s)                                                  \
     {                                                                 \
-        fprintf(stdout, "[FATAL][%s,%d]: %s", __FILE__, __LINE__, s); \
+        fprintf(stdout, "[FATAL][%s,%d]: %s\n", __FILE__, __LINE__, s); \
     }
 
 #define LOG_ERROR(s)                                                  \
     {                                                                 \
-        fprintf(stdout, "[ERROR][%s,%d]: %s", __FILE__, __LINE__, s); \
+        fprintf(stdout, "[ERROR][%s,%d]: %s\n", __FILE__, __LINE__, s); \
     }
 
 #define MOD_PERROR(error)                                        \
     {                                                            \
         fprintf(stdout, "[PERROR][%s, %d]", __FILE__, __LINE__); \
         perror(error);                                           \
+        fprintf(stdout, "\n");                                   \
     }
 
 #define MOD_PRINTF(print_str)                               \

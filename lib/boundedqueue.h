@@ -18,9 +18,10 @@ typedef struct BQueue
     pthread_cond_t cempty;
 } BQueue_t;
 
-/** Alloca ed inizializza una coda di dimensione \param n. 
+/** Alloca ed inizializza una coda di dimensione n.
  *  Deve essere chiamata da un solo thread (tipicamente il thread main).
  *
+ *   \param n lunghezza della coda
  *   \retval NULL se si sono verificati problemi nell'allocazione (errno settato)
  *   \retval q puntatore alla coda allocata
  */
