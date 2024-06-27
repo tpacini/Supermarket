@@ -39,8 +39,8 @@ static int parseS(unsigned int *S1, unsigned int* S2)
     fp = fopen(CONFIG_FILENAME, "r");
     if (fp == NULL)
     {
-        MOD_PERROR("fopen");
         pthread_mutex_unlock(&configAccess);
+        MOD_PERROR("fopen");
         free(buf1);
         free(buf2);
         return -1;
@@ -281,7 +281,7 @@ int main(int argc, char *argv[])
 
     // Other variables
     int ret;                        // return value
-    pthread_t thSu;                 // identifier for sup. handler
+    pthread_t thSu;                 // identifier for supermarket handler
     struct timespec wait_signal;    // main loop waiting time
 
     /* VARIABLE INITIALIZATION AND ARGUMENT PARSING */
@@ -326,8 +326,6 @@ int main(int argc, char *argv[])
     if (parseS(&S1, &S2) != 0)
         exit(EXIT_FAILURE);
 
-    nCustomerWaiting = 0;
-
     // Setup signal handler 
     sigemptyset(&set);
     sigaddset(&set, SIGQUIT);
@@ -351,12 +349,13 @@ int main(int argc, char *argv[])
         goto error;
     }
 
+    nCustomerWaiting = 0;
     pthread_mutex_lock(&gateCustomers);
     gateClosed = true;
     pthread_mutex_unlock(&gateCustomers);
 
     // Unlink socket file if already present
-    remove(SOCKET_FILENAME);
+    remove(SOCKET_FILENAME);  // #TODO: check if the file is always the same or if it changes
 
     /* CREATE SOCKET TO COMMUNICATE WITH SUPERMARKET PROCESS */
     sfd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
@@ -375,7 +374,7 @@ int main(int argc, char *argv[])
 
     // Keep alive to ensure no unlimited waiting on write/read
     optval = 1; // enable option
-    if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0) // TODO: check if setsockopt is needed
+    if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0)
     {
         MOD_PERROR("setsockopt");
         goto error;
@@ -415,9 +414,10 @@ int main(int argc, char *argv[])
 
     LOG_DEBUG("New connection arrived! Socket with the client opened");
 
-    /* Wait for a signal (BLOCKING) for 150 ms, repeatedly. If the timer        timeouts, execute the Director's routine (look for S1 and S2 parameters),
-    otherwise if a signal arrives, notify the Supermarket process through
-    the socket  */
+    /* Wait for a signal (BLOCKING) for 150 ms, repeatedly. If the timer runs out, 
+     * execute the director routine (look for parameters S1 and S2), otherwise, 
+     * if a signal is received, instruct the supermarket process to stop.  
+     * */
     wait_signal.tv_sec = 0;
     wait_signal.tv_nsec = 150 * 1000000; // 150 ms
     while (sigrecv != SIGHUP || sigrecv != SIGQUIT)
@@ -437,14 +437,16 @@ int main(int argc, char *argv[])
                     goto error;
 
                 // Release waiting customers
+                // TODO: release only max. n customers each time??
                 do // FIXME: Director will be stuck here???
                 {
                     pthread_mutex_lock(&gateCustomers);
-                    ret = nCustomerWaiting;
+                    ret = nCustomerWaiting; // FIXME: decrease nCustomerWaiting here???
                     gateClosed = false;
-                    pthread_cond_signal(&exitCustomers);
+                    pthread_cond_signal(&exitCustomers); // pthread_broadcast
                     pthread_mutex_unlock(&gateCustomers);
                 } while (ret != 0);
+                // gateClosed = true
             }
             else
             {
@@ -473,10 +475,12 @@ int main(int argc, char *argv[])
 
     LOG_DEBUG("Signal sent to supermarket");
 
+    // TODO: check if there are remaining custoemrs with zero products??
+
     // Wait that the supermarket closes
     while(true)
     {
-        // Error returned and error is "receiving socket closed"
+        // Error: the socket is closed, supermarket has been shut down
         ret = write(csfd, msg, sizeof(msg));
         if (ret == -1 && errno == EPIPE)
         {
@@ -485,14 +489,14 @@ int main(int argc, char *argv[])
         }
         else if (ret == -1)
         {
-            MOD_PERROR("write, wait supermarket close");
+            MOD_PERROR("write");
             goto error;
         }
         else
             sleep(1);
     }
 
-    pthread_mutex_destroy(&configAccess);
+    pthread_mutex_destroy(&configAccess); // FIXME: if it is locked or used by condwait???
     pthread_mutex_destroy(&gateCustomers);
     pthread_cond_destroy(&exitCustomers);
 
@@ -509,7 +513,7 @@ error:
         sprintf(msg, "%d", SIGQUIT);
         if (write(csfd, msg, sizeof(msg)) == -1)
         {
-            MOD_PERROR("write, error branch");
+            MOD_PERROR("write");
         }
         else
         {
@@ -519,6 +523,11 @@ error:
                 if (write(csfd, msg, strlen(msg)) == -1 && errno == EPIPE)
                 {
                     MOD_PRINTF("Supermarket closed!");
+                    break;
+                }
+                else if (ret == -1)
+                {
+                    LOG_FATAL("write");
                     break;
                 }
                 else
@@ -542,12 +551,7 @@ error:
     return -1;
 }
 
-
-// GLOBAL TODO
-// TODO: Differentiate between fatal errors and warnings
-
 // man unix 7
 
-// Director should handle customers with zero products, how are they handled and where?
 
-// What happens to the memory when you do the fork. The allocated variables will be duplicated
+// What happens to the memory upong forking. The allocated variables will be duplicated?

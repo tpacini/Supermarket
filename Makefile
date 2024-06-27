@@ -10,8 +10,8 @@ LDLIBS      = -lpthread
 
 TARGETS		= supermarket director
 
-# if there is a file called test, this will not create any issue when 
-# calling "make test"
+# if there is a file called test1, this will not create any issue when 
+# calling "make test1"
 .PHONY: clean test1 test2 all 
 
 
@@ -33,9 +33,6 @@ supermarket: src/supermarket.o src/glob.o src/cashier.o src/customer.o lib/bound
 
 director: src/director.o src/glob.o
 	$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
-
-
-
 
 clean:
 	@rm -f src/*.o lib/*.o lib/*.a

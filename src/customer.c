@@ -41,9 +41,7 @@ static int writeLogCustomer(unsigned int nQueue, unsigned int nProd,
     }
 
     fwrite(logMsg, sizeof(char), strlen(logMsg), fp);
-
     fclose(fp);
-    
     pthread_mutex_unlock(&logAccess);
 
     return 0;
@@ -168,12 +166,13 @@ void* CustomerP(void *c)
     // Did you have zero product? Notify director
     if (cu->nProd == 0)
     {
+        // Why not a broadcast??
         pthread_mutex_lock(&gateCustomers);
         nCustomerWaiting += 1;
         while (gateClosed)
            pthread_cond_wait(&exitCustomers, &gateCustomers);
     
-        gateClosed = true;
+        gateClosed = true; // remove
         nCustomerWaiting -= 1;
         pthread_mutex_unlock(&gateCustomers);
     }

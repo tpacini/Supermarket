@@ -15,8 +15,6 @@
 #include "glob.h"
 #include "../lib/logger.h"
 
-
-
 #define SIGHUP_STR "1"
 #define SIGQUIT_STR "3"
 #define SIGTERM 15
@@ -524,7 +522,7 @@ int main(int argc, char* argv[])
         goto error;
     }
 
-    LOG_DEBUG("Connected to socket");
+    LOG_DEBUG("Connected socket");
 
     buf = (char*) malloc((strlen(SIGHUP_STR)+1)*sizeof(char));
     if (buf == NULL)
@@ -584,7 +582,8 @@ int main(int argc, char* argv[])
 
                 for (int i = 0; i < C; i++)
                 {
-                    ret = pthread_kill(customers[i]->id, SIGTERM);
+                    ret = pthread_kill(customers[i]->id, SIGTERM); // FIXME: if the customers have locked mutex??? if SIGQUIT
+                                                                   //        doesn't destroy mutex???
                     if (ret != 0)
                     {
                         MOD_PERROR("pthread_kill");
