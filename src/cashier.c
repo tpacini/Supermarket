@@ -29,62 +29,14 @@ static bool is_open (Cashier_t* ca)
     return result;
 }
 
-int init_cashier(Cashier_t *ca)
-{
-    // Max length = C, all customers lined up here
-    ca->queueCustomers = initBQueue(C);
-    if (ca->queueCustomers == NULL)
-    {
-        MOD_PERROR("initBQueue");
-        if (ca != NULL)
-            free(ca);
-        return -1;
-    }
-
-    if (pthread_mutex_init(&ca->accessQueue, NULL) != 0 ||
-        pthread_mutex_init(&ca->accessState, NULL) != 0 ||
-        pthread_mutex_init(&ca->accessLogInfo, NULL) != 0)
-    {
-        MOD_PERROR("pthread_mutex_init");
-        return -1;
-    }
-
-    ca->nClose = 0;
-    ca->totNCustomer = 0;
-    ca->totNProds = 0;
-    ca->open = false;
-
-    return 0;
-}
-
-int destroy_cashier(Cashier_t *ca)
-{
-    if (ca == NULL)
-        return 0;
-
-    deleteBQueue(ca->queueCustomers, NULL);
-
-    if (pthread_mutex_destroy(&ca->accessQueue) != 0 ||
-        pthread_mutex_destroy(&ca->accessState) != 0 ||
-        pthread_mutex_destroy(&ca->accessLogInfo) != 0)
-    {
-        MOD_PERROR("pthread_mutex_destroy");
-        free(ca);
-        return -1;
-    }
-
-    free(ca);
-    return 0;
-}
-
 /* Parse time required to process a single product,
     from the configuration file. Return 0 on errors. */
 static unsigned int parseTimeProd()
 {
-    unsigned int timeProd;
+    unsigned int timeProd = 0;
     FILE* fp;
     char *buf, *tok;
-    char debug_str[50];
+    //char debug_str[50];
 
     buf = (char*) malloc(MAX_LINE * sizeof(char));
     if (buf == NULL)
@@ -136,8 +88,8 @@ static unsigned int parseTimeProd()
                 return 0;
             }
 
-            sprintf(debug_str, "timeProd is %d", timeProd);
-            LOG_DEBUG(debug_str);
+            //sprintf(debug_str, "timeProd is %d", timeProd);
+            //LOG_DEBUG(debug_str);
         }
         else
             tok = strtok(NULL, " ");
@@ -186,6 +138,7 @@ void* CashierP(void *c)
         // NULL customer, close immediately the cashier
         if (cu == NULL)
         {
+            LOG_DEBUG("Null customer encountered.")
             break;
         }
 

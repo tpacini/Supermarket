@@ -20,15 +20,12 @@
 #define SIGTERM 15
 
 unsigned int K, C, E, T, P, S;
-Cashier_t **cashiers;
 Customer_t **customers;
 pthread_mutex_t logAccess;
 unsigned int currentNCustomer;
 unsigned int totNCustomer;
 unsigned int totNProd;
 pthread_mutex_t numCu;
-
-pthread_mutex_t configAccess;
 
 /* Retrieve number of cashiers to open at startup, from the
     config file. Return number of first cashiers, 0 for errors. */
@@ -247,6 +244,54 @@ static int waitCashierTerm()
         empty = 0;
     }
 
+    return 0;
+}
+
+int init_cashier(Cashier_t *ca)
+{
+    // Max length = C, all customers lined up here
+    ca->queueCustomers = initBQueue(C);
+    if (ca->queueCustomers == NULL)
+    {
+        MOD_PERROR("initBQueue");
+        if (ca != NULL)
+            free(ca);
+        return -1;
+    }
+
+    if (pthread_mutex_init(&ca->accessQueue, NULL) != 0 ||
+        pthread_mutex_init(&ca->accessState, NULL) != 0 ||
+        pthread_mutex_init(&ca->accessLogInfo, NULL) != 0)
+    {
+        MOD_PERROR("pthread_mutex_init");
+        return -1;
+    }
+
+    ca->nClose = 0;
+    ca->totNCustomer = 0;
+    ca->totNProds = 0;
+    ca->open = false;
+
+    return 0;
+}
+
+int destroy_cashier(Cashier_t *ca)
+{
+    if (ca == NULL)
+        return 0;
+
+    deleteBQueue(ca->queueCustomers, NULL);
+
+    if (pthread_mutex_destroy(&ca->accessQueue) != 0 ||
+        pthread_mutex_destroy(&ca->accessState) != 0 ||
+        pthread_mutex_destroy(&ca->accessLogInfo) != 0)
+    {
+        MOD_PERROR("pthread_mutex_destroy");
+        free(ca);
+        return -1;
+    }
+
+    free(ca);
     return 0;
 }
 
@@ -548,8 +593,7 @@ int main(int argc, char* argv[])
         // timeout expired
         else if (ret == 0)
         {
-            LOG_DEBUG("Check if new customers can enter.");
-
+            // Check if new customers can enter
             ret = enterCustomers();
             if (ret == -1)
             {
