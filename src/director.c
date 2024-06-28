@@ -14,9 +14,6 @@
 #include "supermarket.h"
 #include "../lib/logger.h"
 
-pthread_mutex_t configAccess;
-Cashier_t **cashiers;
-
 /* Parse S1 and S2 from the configuration file.
     Return 0 on success, -1 otherwise */
 static int parseS(unsigned int *S1, unsigned int* S2)
@@ -199,7 +196,7 @@ static int checkCashierSituation(unsigned int S1, unsigned int S2,
 
         /* The current cashier is closed and the conditions have
             been met -> open cashier */
-        if (!(&cashiers[i]->open) && found)
+        if (!cashiers[i]->open && found)
         {
             ret = openCashier(cashiers[i]);
             if (ret != 0)
@@ -213,9 +210,9 @@ static int checkCashierSituation(unsigned int S1, unsigned int S2,
             when conditions will be satisfied
            or, cashier is not closed and the conditions have
             not been satisfied yet -> look next cashier */
-        else if (!(&cashiers[i]->open) || found)
+        else if (!cashiers[i]->open || found)
         {
-            if (!(&cashiers[i]->open))
+            if (!cashiers[i]->open)
                 closed_cashier = cashiers[i];
             
             pthread_mutex_unlock(&cashiers[i]->accessState);
@@ -249,17 +246,6 @@ static int checkCashierSituation(unsigned int S1, unsigned int S2,
     return 0;
 }
 
-/* Thread routine that handles supermarket startup.
-    No forck+execve to avoid duplicating parent memory */
-static void* supermarket_handler(void *argv)
-{
-    if (execve(SUPMRKT_EXEC_PATH, (char**)argv, NULL) == -1)
-    {
-        MOD_PERROR("execve");
-    }
-    pthread_exit(0);
-}
-
 int main(int argc, char *argv[])
 {
     // Command line arguments
@@ -280,6 +266,7 @@ int main(int argc, char *argv[])
     int sigrecv = 0;
 
     // Other variables
+    pid_t pid;                      // pid of the forked process
     int ret;                        // return value
     pthread_t thSu;                 // identifier for supermarket handler
     struct timespec wait_signal;    // main loop waiting time
@@ -325,6 +312,28 @@ int main(int argc, char *argv[])
    
     if (parseS(&S1, &S2) != 0)
         exit(EXIT_FAILURE);
+
+    /* EXECUTE SUPERMARKET
+     * The director is forked and replaced by supermarket but memory is  
+     * duplicated.
+     */
+    pid = fork();
+
+    if (pid < 0)
+    {
+        MOD_PERROR("fork");
+        goto error;
+    }
+    else if (pid == 0)
+    {
+        LOG_DEBUG("Director process forked.");
+
+        if (execve(SUPMRKT_EXEC_PATH, (char **)argv, NULL) == -1)
+        {
+            MOD_PERROR("execve");
+            goto error;
+        }
+    }
 
     // Setup signal handler 
     sigemptyset(&set);
@@ -389,14 +398,6 @@ int main(int argc, char *argv[])
 
     LOG_DEBUG("Ready to accept connections.");
 
-    /* EXECUTE SUPERMARKET */
-    ret = pthread_create(&thSu, NULL, supermarket_handler, argv);
-    if (ret != 0)
-    {
-        MOD_PERROR("pthread_create");
-        goto error;
-    }
-
     // Prepare for accepting connection
     if (listen(sfd, 1) == -1)
     {
@@ -412,7 +413,7 @@ int main(int argc, char *argv[])
         goto error;
     }
 
-    LOG_DEBUG("New connection arrived! Socket with the client opened");
+    LOG_DEBUG("New connection arrived!");
 
     /* Wait for a signal (BLOCKING) for 150 ms, repeatedly. If the timer runs out, 
      * execute the director routine (look for parameters S1 and S2), otherwise, 
@@ -447,6 +448,11 @@ int main(int argc, char *argv[])
                     pthread_mutex_unlock(&gateCustomers);
                 } while (ret != 0);
                 // gateClosed = true
+            }
+            else if (cashiers == NULL)
+            {
+                LOG_DEBUG("Cashiers have not been allocated yet.");
+                MOD_PRINTF("Waiting for cashiers allocation...");
             }
             else
             {
@@ -484,7 +490,7 @@ int main(int argc, char *argv[])
         ret = write(csfd, msg, sizeof(msg));
         if (ret == -1 && errno == EPIPE)
         {
-            MOD_PRINTF("Supermarket closed!\n");
+            LOG_DEBUG("Supermarket closed!\n");
             break;
         }
         else if (ret == -1)
@@ -506,6 +512,8 @@ int main(int argc, char *argv[])
     return 0;
 
 error: 
+
+    LOG_ERROR("Error encountered: closing Supermarket, Director is exiting...");
 
     if (csfd != -1)
     {
@@ -550,8 +558,3 @@ error:
     
     return -1;
 }
-
-// man unix 7
-
-
-// What happens to the memory upong forking. The allocated variables will be duplicated?
