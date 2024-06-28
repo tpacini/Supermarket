@@ -4,41 +4,39 @@ ARFLAGS     =  rvs
 CC		    =  gcc
 CFLAGS	    = -std=c99 -Wall -g 
 INCLUDES	= -I .
-LDFLAGS 	= -L .
+LDFLAGS 	= -L./lib
 OPTFLAGS 	= -O3 -DNDEBUG 
-LDLIBS      = -lpthread 
+LDLIBS      = -lpthread -lboundedqueue
 
-TARGETS		= supermarket director
+TARGETS		= lib/libboundedqueue.so supermarket director
 
 # if there is a file called test1, this will not create any issue when 
 # calling "make test1"
 .PHONY: clean test1 test2 all 
 
-
-%: %.c
-	@$(CC) $(CFLAGS) $(INCLUDES) $(OPTFLAGS) -o $@ $< $(LDFLAGS) $(LIBS)
-
-%.o: %.c %.h
+%.o: %.c
 	@$(CC) $(CFLAGS) $(INCLUDES) $(OPTFLAGS) -c -o $@ $<
 
 all: $(TARGETS)
 
-
 # target : prerequisites, following recipe
 # '@' before the command, to not print command
-lib/boundedqueue.o: lib/boundedqueue.c lib/boundedqueue.h
+lib/libboundedqueue.so: lib/boundedqueue.c
+	$(CC) -c -Wall -Werror -fpic $< -o lib/boundedqueue.o
+	$(CC) -shared -o $@ lib/boundedqueue.o
 
-supermarket: src/supermarket.o src/glob.o src/cashier.o src/customer.o lib/boundedqueue.o
+director: src/director.o src/glob.o src/supermarket.o src/cashier.o  
 	$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
-director: src/director.o src/glob.o
-	$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
+supermarket: src/supermarket.o src/cashier.o src/customer.o src/glob.o
+	$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) 
 
 clean:
-	@rm -f src/*.o lib/*.o lib/*.a
+	@rm -f src/*.o lib/*.o lib/*.so
 	@rm -f director supermarket
 
 test1:
+	@export LD_LIBRARY_PATH=/home/ranxerox/Documenti/Supermarket/lib:$LD_LIBRARY_PATH
 	@./director 2 20 5 500 80 30 & 
 	@sleep 15
 	@killall -s SIGHUP director
