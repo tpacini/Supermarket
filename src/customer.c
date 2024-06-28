@@ -53,23 +53,16 @@ static int writeLogCustomer(unsigned int nQueue, unsigned int nProd,
     Assumption: at least one register is open, take the risk of picking a line that could be closed in the meantime. */
 static unsigned int chooseCashier (Cashier_t* currentCa)
 {
-    int i;
     Cashier_t* pastCa = currentCa;
 
-    pthread_mutex_lock(&currentCa->accessQueue);
-    /* If no current cashier, pick the first one, start checking
-     from the next one */
-    if (currentCa == NULL || currentCa->queueCustomers == NULL)
+    if (pastCa == NULL)
     {
         currentCa = cashiers[0];
-        i = 1;
+        pastCa = currentCa;
     }
-    else
-    {
-        i = 0;
-    }
-        
-    for (; i < K; i++)
+
+    pthread_mutex_lock(&currentCa->accessQueue);
+    for (int i = 0; i < K; i++)
     {
         // No mutex: tradeoff performance-optimal result
         if (cashiers[i]->queueCustomers != NULL)
