@@ -21,11 +21,13 @@
 
 unsigned int K, C, E, T, P, S;
 Customer_t **customers;
+Cashier_t **cashiers;
 pthread_mutex_t logAccess;
 unsigned int currentNCustomer;
 unsigned int totNCustomer;
 unsigned int totNProd;
 pthread_mutex_t numCu;
+pthread_mutex_t configAccess;
 
 /* Retrieve number of cashiers to open at startup, from the
     config file. Return number of first cashiers, 0 for errors. */
@@ -121,10 +123,12 @@ static int writeLogSupermarket()
     unsigned int to, mst;
     FILE* fp;
 
-    // No mutex needed, all the threads terminated
+    // Unnecessary, all the threads terminated
+    pthread_mutex_lock(&logAccess);
     fp = fopen(LOG_FILENAME, "a");
     if (fp == NULL)
     {
+        pthread_mutex_unlock(&logAccess);
         MOD_PERROR("fopen");
         return -1;
     }
@@ -135,6 +139,7 @@ static int writeLogSupermarket()
     {
         MOD_PERROR("malloc");
         fclose(fp);
+        pthread_mutex_unlock(&logAccess);
         return -1;
     }
     sprintf(logMsg, "%10u %10u\n", totNCustomer, totNProd);
@@ -147,6 +152,7 @@ static int writeLogSupermarket()
     {
         MOD_PERROR("malloc");
         fclose(fp);
+        pthread_mutex_unlock(&logAccess);
         return -1;
     }
 
@@ -167,6 +173,8 @@ static int writeLogSupermarket()
 
     free(logMsg);
     fclose(fp);
+    pthread_mutex_unlock(&logAccess);
+    LOG_DEBUG("Write last information on log file.");
 
     return 0;
 }
@@ -220,24 +228,18 @@ static int waitCashierTerm()
      * the null object when popped will make the cashiers exit */
     for (int i = 0; i < K; i++)
     {
-        // Wait that cashier handles customers
+        LOG_DEBUG("Waiting cashier termination.");
         while (!empty)
         {
-            pthread_mutex_lock(&cashiers[i]->accessQueue);
-            if (cashiers[i]->queueCustomers->qlen == 0)
+            if (getLength(cashiers[i]->queueCustomers) == 0)
             {
                 push(cashiers[i]->queueCustomers, nullCu);
                 empty = 1;
             }
-            pthread_mutex_unlock(&cashiers[i]->accessQueue);
-
-            if (!empty)
+            else if (nanosleep(&timeout, NULL) != 0)
             {
-                if (nanosleep(&timeout, NULL) != 0)
-                {
-                    MOD_PERROR("nanosleep");
-                    return -1;
-                }
+                MOD_PERROR("nanosleep");
+                return -1;
             }
         }
 
@@ -249,18 +251,22 @@ static int waitCashierTerm()
 
 int init_cashier(Cashier_t *ca)
 {
-    // Max length = C, all customers lined up here
-    ca->queueCustomers = initBQueue(C);
-    if (ca->queueCustomers == NULL)
+    if (!ca)
     {
-        MOD_PERROR("initBQueue");
-        if (ca != NULL)
-            free(ca);
+        LOG_ERROR("ca is NULL.");
         return -1;
     }
 
-    if (pthread_mutex_init(&ca->accessQueue, NULL) != 0 ||
-        pthread_mutex_init(&ca->accessState, NULL) != 0 ||
+    // Max length = C, all customers lined up here
+    ca->queueCustomers = initBQueue(C);
+    if (!ca->queueCustomers)
+    {
+        MOD_PERROR("initBQueue");
+        free(ca);
+        return -1;
+    }
+
+    if (pthread_mutex_init(&ca->accessState, NULL) != 0 ||
         pthread_mutex_init(&ca->accessLogInfo, NULL) != 0)
     {
         MOD_PERROR("pthread_mutex_init");
@@ -282,8 +288,7 @@ int destroy_cashier(Cashier_t *ca)
 
     deleteBQueue(ca->queueCustomers, NULL);
 
-    if (pthread_mutex_destroy(&ca->accessQueue) != 0 ||
-        pthread_mutex_destroy(&ca->accessState) != 0 ||
+    if (pthread_mutex_destroy(&ca->accessState) != 0 ||
         pthread_mutex_destroy(&ca->accessLogInfo) != 0)
     {
         MOD_PERROR("pthread_mutex_destroy");
@@ -300,71 +305,64 @@ int destroy_cashier(Cashier_t *ca)
     Return 0 if success, -1 for errors. */
 static int enterCustomers()
 {
-    int ret, index = 0, running;
+    int ret, remaining = E, running;
     Customer_t *c = NULL;
 
-    // Start E customer threads
+    // If sufficient space, start E customer threads
     if (currentNCustomer <= C-E)
     {
         pthread_mutex_lock(&numCu);
         currentNCustomer += E;
-        pthread_mutex_lock(&numCu);
+        pthread_mutex_unlock(&numCu);
 
-        // FIXME: can me improved, only inner loop and using a variable for
-        // the number of customers started, look careful at mutex use, ?lock all?
-        for (int i = 0; i < E; i++)
+        // Find unused data structure
+        for (int j = 0; j < C; j++)
         {
             pthread_t thCu;
 
-            // Find unused data structure
-            for (int j = index; j < C; j++)
-            {
-                pthread_mutex_lock(&customers[j]->accessState);
-                if (customers[j]->running == 0)
-                    running = 0;
-                else
-                    running = 1;
-                pthread_mutex_unlock(&customers[j]->accessState);
+            pthread_mutex_lock(&customers[j]->accessState);
+            running = customers[j]->running;
+            pthread_mutex_unlock(&customers[j]->accessState);
 
-                if(!running)
+            if(!running)
+            {
+                c = customers[j];
+
+                // Reset data
+                c->productProcessed = false;
+                c->yourTurn = false;
+                c->nProd = rand() % (P - 0 + 1);
+                c->running = 1;
+                c->id = thCu;
+
+                ret = pthread_create(&thCu, NULL, (void *)CustomerP, c);
+                if (ret != 0)
                 {
-                    c = customers[i];
-
-                    // Reset data
-                    c->productProcessed = false;
-                    c->yourTurn = false;
-                    c->nProd = rand() % (P - 0 + 1);
-                    c->running = 1;
-                    c->id = thCu;
-
-                    break;
+                    MOD_PERROR("pthread_create");
+                    return -1;
                 }
+                if (pthread_detach(thCu) != 0)
+                {
+                    MOD_PERROR("pthread_detach");
+                    return -1;
+                }
+
+                remaining -= 1;
             }
 
-            if (c == NULL)
-            {
-                LOG_ERROR("no free structure found.");
-                return -1;
-            }
-
-            ret = pthread_create(&thCu, NULL, (void*)CustomerP, c);
-            if (ret != 0)
-            {
-                MOD_PERROR("pthread_create");
-                return -1;
-            }
-            if (pthread_detach(thCu) != 0)
-            {
-                MOD_PERROR("pthread_detach");
-                return -1;
-            }
+            if (remaining == 0)
+                break;
         }
+
+        if (remaining != 0)
+            LOG_ERROR("Not all E customer threads have been started.");
+            
     }
 
     return 0;
 }
 
-int main(int argc, char* argv[])
+void *SupermarketP(void* a)
 {
     /* "select" variables */
     fd_set s;
@@ -376,6 +374,7 @@ int main(int argc, char* argv[])
 
     /* General variables */
     char *buf = NULL;
+    char** argv = (char**) a;
     int ret;
     unsigned int nFirstCashier = 0; // number of cashier to start at time 0
 
@@ -388,12 +387,6 @@ int main(int argc, char* argv[])
     {
         MOD_PERROR("pthread_mutex_init");
         goto error;
-    }
-
-    if (argc != 7)
-    {
-        fprintf(stdout, "Usage: %s <K> <C> <E> <T> <P> <S>\n", argv[0]);
-        exit(EXIT_FAILURE);
     }
 
     errno = 0;
@@ -456,7 +449,7 @@ int main(int argc, char* argv[])
         if (cashiers[i] == NULL)
         {
             MOD_PERROR("malloc");
-            return -1;
+            pthread_exit(0);
         }
         
         if(init_cashier(cashiers[i]) != 0)
@@ -506,7 +499,7 @@ int main(int argc, char* argv[])
         if (customers[i] == NULL)
         {
             MOD_PERROR("malloc");
-            return -1;
+            pthread_exit(0);
         }
 
         if (init_customer(customers[i]) == -1)
@@ -593,7 +586,6 @@ int main(int argc, char* argv[])
         // timeout expired
         else if (ret == 0)
         {
-            // Check if new customers can enter
             ret = enterCustomers();
             if (ret == -1)
             {
@@ -615,12 +607,13 @@ int main(int argc, char* argv[])
 
             if (strcmp(buf, SIGHUP_STR) != 0 && strcmp(buf, SIGQUIT_STR) != 0)
             {
+                LOG_DEBUG("The message is not the one we are looking for.");
                 FD_SET(sfd, &s);
                 continue;
             }
 
             // Terminate customers' threads
-            if (strcmp(buf, SIGQUIT_STR) == 0)
+            if (strcmp(buf, SIGQUIT_STR) == 0) // FIXME: this state is not correct, can cause several issues. Solution: let the customer handle the SIGTERM???
             {
                 LOG_DEBUG("Read SIGQUIT signal.");
 
@@ -681,7 +674,7 @@ error:
     {
         for (int i = 0; i < K; i++)
         {
-            destroy_cashier(cashiers[i]); // FIXME:
+            destroy_cashier(cashiers[i]); // FIXME: there should be a quick way to kill all the cashiers, like pthread_kill and then destroy
         }
 
         free(cashiers);
@@ -692,14 +685,23 @@ error:
         for (int i = 0; i < C; i++)
         {
             ret = pthread_kill(customers[i]->id, SIGTERM);
-            destroy_customer(customers[i]);
+            if (ret != 0)
+                LOG_FATAL("Unable to kill customer.");
+
+            ret = destroy_customer(customers[i]);
+            if (ret != 0)
+                LOG_FATAL("Unable to destroy customer's data.");
         }
 
         free(customers);
     }
-         
 
-    // check all missing variables (also customers, cashiers,..)
+
+
+    pthread_mutex_destroy(&numCu);
+    pthread_mutex_destroy(&logAccess);
+    pthread_mutex_destroy(&configAccess); // FIXME: if it is locked or used by condwait???
+
     // TODO: NOTIFY DIRECTOR OF THE ERROR
 
     // TODO: different seed for every thread which used rand_r
@@ -708,4 +710,5 @@ error:
     LOG_DEBUG("Closing Supermarket.");
 
     close(sfd);
+    pthread_exit(0);
 }

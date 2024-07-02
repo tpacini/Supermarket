@@ -16,4 +16,6 @@ extern Cashier_t **cashiers; // list of all the cashiers
 
 extern Customer_t **customers; // list of all the customers;
 
+void* SupermarketP(void* a);
+
 #endif
