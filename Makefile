@@ -8,7 +8,7 @@ LDFLAGS 	= -L./lib
 OPTFLAGS 	= -O3 -DNDEBUG 
 LDLIBS      = -lpthread -lboundedqueue
 
-TARGETS		= lib/libboundedqueue.so supermarket director
+TARGETS		= lib/libboundedqueue.so director
 
 # if there is a file called test1, this will not create any issue when 
 # calling "make test1"
@@ -25,16 +25,12 @@ lib/libboundedqueue.so: lib/boundedqueue.c
 	$(CC) -c -Wall -Werror -fpic $< -o lib/boundedqueue.o
 	$(CC) -shared -o $@ lib/boundedqueue.o
 
-director: src/director.o src/glob.o src/supermarket.o src/cashier.o  
+director: src/director.o src/glob.o src/supermarket.o src/cashier.o src/customer.o
 	$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS)
-
-supermarket: src/supermarket.o src/cashier.o src/customer.o src/glob.o
-	$(CC) $(CCFLAGS) $(INCLUDES) $(OPTFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) 
 
 clean:
 	@rm -f src/*.o lib/*.o lib/*.so
-	@rm -f director supermarket
-
+	@rm -f director
 test1:
 	@export LD_LIBRARY_PATH=/home/ranxerox/Documenti/Supermarket/lib:$LD_LIBRARY_PATH
 	@./director 2 20 5 500 80 30 & 
