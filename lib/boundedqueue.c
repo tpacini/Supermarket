@@ -3,7 +3,7 @@
 #include <pthread.h>
 #include <errno.h>
 #include <stdio.h>
-#include <lib/boundedqueue.h>
+#include "boundedqueue.h"
 
 /**
  * @file boundedqueue.c
@@ -35,16 +35,22 @@ BQueue_t *initBQueue(size_t n)
 
     if (pthread_mutex_init(&q->m, NULL) != 0)
     {
+        free(q->buf);
         perror("pthread_mutex_init");
         goto error;
     }
     if (pthread_cond_init(&q->cfull, NULL) != 0)
     {
+        free(q->buf);
+        pthread_mutex_destroy(&q->m);
         perror("pthread_cond_init full");
         goto error;
     }
     if (pthread_cond_init(&q->cempty, NULL) != 0)
     {
+        free(q->buf);
+        pthread_mutex_destroy(&q->m);
+        pthread_cond_destroy(&q->cfull);
         perror("pthread_cond_init empty");
         goto error;
     }
@@ -57,14 +63,6 @@ error:
     if (!q)
         return NULL;
     int myerrno = errno;
-    if (q->buf)
-        free(q->buf);
-    if (&q->m)
-        pthread_mutex_destroy(&q->m);
-    if (&q->cfull)
-        pthread_cond_destroy(&q->cfull);
-    if (&q->cempty)
-        pthread_cond_destroy(&q->cempty);
     free(q);
     errno = myerrno;
     return NULL;
@@ -83,14 +81,14 @@ void deleteBQueue(BQueue_t *q, void (*F)(void *))
         while ((data = pop(q)))
             F(data);
     }
+    
     if (q->buf)
         free(q->buf);
-    if (&q->m)
-        pthread_mutex_destroy(&q->m);
-    if (&q->cfull)
-        pthread_cond_destroy(&q->cfull);
-    if (&q->cempty)
-        pthread_cond_destroy(&q->cempty);
+    
+    pthread_mutex_destroy(&q->m);
+    pthread_cond_destroy(&q->cfull);
+    pthread_cond_destroy(&q->cempty);
+    
     free(q);
 }
 

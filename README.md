@@ -1,5 +1,9 @@
 # Supermarket
 
+TODO: spiegare struttura, che tutto parte dal director, che prende certi argomenti da linea di comando
+      spiegare configuration file e i suoi parametri
+      support only Linux (socket etc.)
+
 ## Dettagli di implementazione
 
 ***Supermercato:*** \

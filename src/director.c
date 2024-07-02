@@ -14,8 +14,10 @@
 #include "supermarket.h"
 #include "../lib/logger.h"
 
-pthread_mutex_t configAccess;
-Cashier_t **cashiers;
+pthread_cond_t exitCustomers;
+pthread_mutex_t gateCustomers;
+unsigned int nCustomerWaiting;
+bool gateClosed;
 
 /* Parse S1 and S2 from the configuration file.
     Return 0 on success, -1 otherwise */
@@ -35,12 +37,10 @@ static int parseS(unsigned int *S1, unsigned int* S2)
         return -1;
     }
 
-    pthread_mutex_lock(&configAccess);
     fp = fopen(CONFIG_FILENAME, "r");
     if (fp == NULL)
     {
         MOD_PERROR("fopen");
-        pthread_mutex_unlock(&configAccess);
         free(buf1);
         free(buf2);
         return -1;
@@ -49,7 +49,6 @@ static int parseS(unsigned int *S1, unsigned int* S2)
     // first line
     if(fgets(buf1, MAX_LINE, fp) == NULL)
     {
-        pthread_mutex_unlock(&configAccess);
         MOD_PERROR("fgets");
         fclose(fp);
         free(buf1);
@@ -59,7 +58,6 @@ static int parseS(unsigned int *S1, unsigned int* S2)
     // second line
     if (fgets(buf1, MAX_LINE, fp) == NULL)
     {
-        pthread_mutex_unlock(&configAccess);
         MOD_PERROR("fgets");
         fclose(fp);
         free(buf1);
@@ -71,7 +69,6 @@ static int parseS(unsigned int *S1, unsigned int* S2)
     // Read third line
     if (fgets(buf1, MAX_LINE, fp) == 0)
     {
-        pthread_mutex_unlock(&configAccess);
         MOD_PERROR("fgets");
         fclose(fp);
         free(buf1);
@@ -82,7 +79,6 @@ static int parseS(unsigned int *S1, unsigned int* S2)
     // Read fourth line
     if (fgets(buf2, MAX_LINE, fp) == 0)
     {
-        pthread_mutex_unlock(&configAccess);
         MOD_PERROR("fgets");
         fclose(fp);
         free(buf1);
@@ -91,7 +87,6 @@ static int parseS(unsigned int *S1, unsigned int* S2)
     }
 
     fclose(fp);
-    pthread_mutex_unlock(&configAccess);
 
     // Parse variable S1 from line read
     tok = strtok(buf1, " ");
@@ -103,7 +98,7 @@ static int parseS(unsigned int *S1, unsigned int* S2)
             tok = strtok(NULL, " ");
             errno = 0;
             *S1 = strtoul(tok, NULL, 10);
-            if (errno == EINVAL || errno == ERANGE)
+            if (errno == EINVAL || errno == ERANGE || S1 < 0)
             {
                 MOD_PERROR("strtoul");
                 free(buf1);
@@ -111,7 +106,7 @@ static int parseS(unsigned int *S1, unsigned int* S2)
                 return -1;
             }
 
-            sprintf(debug_str, "parsed S1 is %u", *S1);
+            sprintf(debug_str, "S1 is %u", *S1);
             LOG_DEBUG(debug_str);
         }
         else
@@ -129,14 +124,14 @@ static int parseS(unsigned int *S1, unsigned int* S2)
             tok = strtok(NULL, " ");
             errno = 0;
             *S2 = strtoul(tok, NULL, 10);
-            if (errno == EINVAL || errno == ERANGE)
+            if (errno == EINVAL || errno == ERANGE || S2 < 0)
             {
                 MOD_PERROR("strtoul");
                 free(buf2);
                 return -1;
             }
 
-            sprintf(debug_str, "parsed S2 is %u", *S2);
+            sprintf(debug_str, "S2 is %u", *S2);
             LOG_DEBUG(debug_str);
         }
         else
@@ -156,7 +151,7 @@ static int openCashier(Cashier_t *ca)
 
     if (ca == NULL)
     {
-        MOD_PERROR("ca is NULL");
+        LOG_ERROR("ca is NULL");
         return -1;
     }
 
@@ -190,8 +185,11 @@ static int checkCashierSituation(unsigned int S1, unsigned int S2,
     unsigned int countS1 = 0, countS2 = 0;
     Cashier_t *closed_cashier = NULL;
     
-
-    // FIXME: Could be optimized??
+    if (K <= 0 || S1 < 0 || S2 < 0)
+    {
+        LOG_ERROR("Wrong input parameters.");
+        return -1;
+    }
 
     for (int i = 0; i < K; i++)
     {
@@ -199,7 +197,7 @@ static int checkCashierSituation(unsigned int S1, unsigned int S2,
 
         /* The current cashier is closed and the conditions have
             been met -> open cashier */
-        if (!(&cashiers[i]->open) && found)
+        if (!cashiers[i]->open && found)
         {
             ret = openCashier(cashiers[i]);
             if (ret != 0)
@@ -207,57 +205,42 @@ static int checkCashierSituation(unsigned int S1, unsigned int S2,
                 pthread_mutex_unlock(&cashiers[i]->accessState);
                 return -1;
             }
+
+            return 0;
         }
         /* cashier is closed and the conditions have
             not been satisfied yet -> save cashier for
             when conditions will be satisfied
-           or, cashier is not closed and the conditions have
+           or, cashier is open and the conditions have
             not been satisfied yet -> look next cashier */
-        else if (!(&cashiers[i]->open) || found)
+        else if (!cashiers[i]->open)
         {
-            if (!(&cashiers[i]->open))
-                closed_cashier = cashiers[i];
-            
+            closed_cashier = cashiers[i];
             pthread_mutex_unlock(&cashiers[i]->accessState);
             continue;
         }
 
         pthread_mutex_unlock(&cashiers[i]->accessState);
-
-        pthread_mutex_lock(&cashiers[i]->accessQueue);
-        if (*(&cashiers[i]->queueCustomers->qlen) <= 1)
+        
+        if (getLength(cashiers[i]->queueCustomers) <= 1)
             countS1 += 1;
-        if (*(&cashiers[i]->queueCustomers->qlen) >= S2)
+        if (getLength(cashiers[i]->queueCustomers) >= S2)
             countS2 += 1;
-        pthread_mutex_unlock(&cashiers[i]->accessQueue);
-
+        
         // Conditions satisfied, open a cashier
         if (countS1 >= S1 || countS2 >= 1)
         {
+            LOG_DEBUG("Conditions satisfied, opening cashier.");
             found = true;
             if (closed_cashier != NULL)
             {
                 ret = openCashier(closed_cashier);
-                if (ret == -1)
-                    return -1;
-                else
-                    return 0;
+                return ret;
             }
         }
     }
 
     return 0;
-}
-
-/* Thread routine that handles supermarket startup.
-    No forck+execve to avoid duplicating parent memory */
-static void* supermarket_handler(void *argv)
-{
-    if (execve(SUPMRKT_EXEC_PATH, (char**)argv, NULL) == -1)
-    {
-        MOD_PERROR("execve");
-    }
-    pthread_exit(0);
 }
 
 int main(int argc, char *argv[])
@@ -281,7 +264,7 @@ int main(int argc, char *argv[])
 
     // Other variables
     int ret;                        // return value
-    pthread_t thSu;                 // identifier for sup. handler
+    pthread_t thSu;                 // identifier for supermarket thread
     struct timespec wait_signal;    // main loop waiting time
 
     /* VARIABLE INITIALIZATION AND ARGUMENT PARSING */
@@ -326,8 +309,6 @@ int main(int argc, char *argv[])
     if (parseS(&S1, &S2) != 0)
         exit(EXIT_FAILURE);
 
-    nCustomerWaiting = 0;
-
     // Setup signal handler 
     sigemptyset(&set);
     sigaddset(&set, SIGQUIT);
@@ -351,12 +332,18 @@ int main(int argc, char *argv[])
         goto error;
     }
 
+    nCustomerWaiting = 0;
     pthread_mutex_lock(&gateCustomers);
     gateClosed = true;
     pthread_mutex_unlock(&gateCustomers);
 
     // Unlink socket file if already present
-    remove(SOCKET_FILENAME);
+    ret = remove(SOCKET_FILENAME);
+    if (ret == 0) {
+        LOG_DEBUG("Socket file removed");
+    } else {
+        LOG_DEBUG("Socket file does not exists");
+    }   
 
     /* CREATE SOCKET TO COMMUNICATE WITH SUPERMARKET PROCESS */
     sfd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
@@ -375,7 +362,7 @@ int main(int argc, char *argv[])
 
     // Keep alive to ensure no unlimited waiting on write/read
     optval = 1; // enable option
-    if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0) // TODO: check if setsockopt is needed
+    if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0)
     {
         MOD_PERROR("setsockopt");
         goto error;
@@ -390,20 +377,28 @@ int main(int argc, char *argv[])
 
     LOG_DEBUG("Ready to accept connections.");
 
-    /* EXECUTE SUPERMARKET */
-    ret = pthread_create(&thSu, NULL, supermarket_handler, argv);
-    if (ret != 0)
-    {
-        MOD_PERROR("pthread_create");
-        goto error;
-    }
-
     // Prepare for accepting connection
     if (listen(sfd, 1) == -1)
     {
         MOD_PERROR("listen");
         goto error;
     }
+
+    // EXECUTE SUPERMARKET
+    ret = pthread_create(&thSu, NULL, SupermarketP, argv);
+    if (ret != 0)
+    {
+        MOD_PERROR("pthread_create");
+        goto error;
+    }
+
+    if (pthread_detach(thSu) != 0)
+    {
+        MOD_PERROR("pthread_detach");
+        goto error;
+    }
+
+    LOG_DEBUG("Supermarket thread created.");
 
     // Wait for connection
     csfd = accept(sfd, NULL, NULL);
@@ -413,11 +408,12 @@ int main(int argc, char *argv[])
         goto error;
     }
 
-    LOG_DEBUG("New connection arrived! Socket with the client opened");
+    LOG_DEBUG("New connection arrived!");
 
-    /* Wait for a signal (BLOCKING) for 150 ms, repeatedly. If the timer        timeouts, execute the Director's routine (look for S1 and S2 parameters),
-    otherwise if a signal arrives, notify the Supermarket process through
-    the socket  */
+    /* Wait for a signal (BLOCKING) for 150 ms, repeatedly. If the timer runs out, 
+     * execute the director routine (look for parameters S1 and S2), otherwise, 
+     * if a signal is received, instruct the supermarket process to stop.  
+     * */
     wait_signal.tv_sec = 0;
     wait_signal.tv_nsec = 150 * 1000000; // 150 ms
     while (sigrecv != SIGHUP || sigrecv != SIGQUIT)
@@ -430,21 +426,19 @@ int main(int argc, char *argv[])
             // Timeout, no signal arrived
             if (sigrecv == -1 && errno == EAGAIN && cashiers != NULL)
             {
-                LOG_DEBUG("Checking cashier situation");
-
                 ret = checkCashierSituation(S1, S2, K);
                 if (ret != 0)
                     goto error;
 
                 // Release waiting customers
-                do // FIXME: Director will be stuck here???
-                {
-                    pthread_mutex_lock(&gateCustomers);
-                    ret = nCustomerWaiting;
-                    gateClosed = false;
-                    pthread_cond_signal(&exitCustomers);
-                    pthread_mutex_unlock(&gateCustomers);
-                } while (ret != 0);
+                pthread_mutex_lock(&gateCustomers);
+                pthread_cond_broadcast(&exitCustomers);
+                pthread_mutex_unlock(&gateCustomers);
+            }
+            else if (cashiers == NULL)
+            {
+                LOG_DEBUG("Cashiers have not been allocated yet.");
+                MOD_PRINTF("Waiting for cashiers allocation...");
             }
             else
             {
@@ -473,26 +467,29 @@ int main(int argc, char *argv[])
 
     LOG_DEBUG("Signal sent to supermarket");
 
+    pthread_mutex_lock(&gateCustomers);
+    pthread_cond_broadcast(&exitCustomers);
+    pthread_mutex_unlock(&gateCustomers);
+
     // Wait that the supermarket closes
     while(true)
     {
-        // Error returned and error is "receiving socket closed"
+        // Error: the socket is closed, supermarket has been shut down
         ret = write(csfd, msg, sizeof(msg));
         if (ret == -1 && errno == EPIPE)
         {
-            MOD_PRINTF("Supermarket closed!\n");
+            LOG_DEBUG("Supermarket closed!\n");
             break;
         }
         else if (ret == -1)
         {
-            MOD_PERROR("write, wait supermarket close");
+            MOD_PERROR("write");
             goto error;
         }
         else
             sleep(1);
     }
 
-    pthread_mutex_destroy(&configAccess);
     pthread_mutex_destroy(&gateCustomers);
     pthread_cond_destroy(&exitCustomers);
 
@@ -501,24 +498,31 @@ int main(int argc, char *argv[])
     close(sfd);
     return 0;
 
-error: 
+error:
 
     if (csfd != -1)
     {
         // Close supermarket, sending a SIGQUIT to it
+        LOG_DEBUG("Sending SIQUIT to Supermarket due to error.");
         sprintf(msg, "%d", SIGQUIT);
         if (write(csfd, msg, sizeof(msg)) == -1)
         {
-            MOD_PERROR("write, error branch");
+            MOD_PERROR("write");
         }
         else
         {
             // Wait that the supermarket closes
             while (true)
             {
-                if (write(csfd, msg, strlen(msg)) == -1 && errno == EPIPE)
+                ret = write(csfd, msg, strlen(msg));
+                if (ret == -1 && errno == EPIPE)
                 {
                     MOD_PRINTF("Supermarket closed!");
+                    break;
+                }
+                else if (ret == -1)
+                {
+                    MOD_PERROR("write");
                     break;
                 }
                 else
@@ -528,26 +532,14 @@ error:
         close(csfd);
     }
     
-    pthread_mutex_destroy(&configAccess);
     pthread_mutex_destroy(&gateCustomers);
     pthread_cond_destroy(&exitCustomers);
+    remove(SOCKET_FILENAME);
 
     LOG_DEBUG("Director is exiting...");
-
-    remove(SOCKET_FILENAME);
 
     if (sfd != -1)
         close(sfd);
     
     return -1;
 }
-
-
-// GLOBAL TODO
-// TODO: Differentiate between fatal errors and warnings
-
-// man unix 7
-
-// Director should handle customers with zero products, how are they handled and where?
-
-// What happens to the memory when you do the fork. The allocated variables will be duplicated

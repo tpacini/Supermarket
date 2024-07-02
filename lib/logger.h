@@ -23,9 +23,8 @@
 
 #define MOD_PERROR(error)                                        \
     {                                                            \
-        fprintf(stdout, "[PERROR][%s, %d]", __FILE__, __LINE__); \
+        fprintf(stderr, "[PERROR][%s, %d]: ", __FILE__, __LINE__); \
         perror(error);                                           \
-        fprintf(stdout, "\n");                                   \
     }
 
 #define MOD_PRINTF(print_str)                               \

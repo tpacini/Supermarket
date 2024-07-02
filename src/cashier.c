@@ -13,81 +13,36 @@
 #include "glob.h"
 #include "../lib/logger.h"
 
-// TODO: check the entire file
-
 /* Check if the cashiers is open (concurrent safe).
     Return true if it is open, false otherwise */
 static bool is_open (Cashier_t* ca)
 {
-    bool result = false;
+    bool result;
+
+    if (!ca)
+    {
+        LOG_ERROR("ca is NULL");
+        return false;
+    }
 
     pthread_mutex_lock(&ca->accessState);
-    if (ca->open)
-        result = true;
+    result = ca->open;
     pthread_mutex_unlock(&ca->accessState);
     
     return result;
-}
-
-int init_cashier(Cashier_t *ca)
-{
-    // Max length = C, all customers lined up here
-    ca->queueCustomers = initBQueue(C);
-    if (ca->queueCustomers == NULL)
-    {
-        MOD_PERROR("initBQueue");
-        if (ca != NULL)
-            free(ca);
-        return -1;
-    }
-
-    if (pthread_mutex_init(&ca->accessQueue, NULL) != 0 ||
-        pthread_mutex_init(&ca->accessState, NULL) != 0 ||
-        pthread_mutex_init(&ca->accessLogInfo, NULL) != 0)
-    {
-        MOD_PERROR("pthread_mutex_init");
-        return -1;
-    }
-
-    ca->nClose = 0;
-    ca->totNCustomer = 0;
-    ca->totNProds = 0;
-    ca->open = false;
-
-    return 0;
-}
-
-int destroy_cashier(Cashier_t *ca)
-{
-    if (ca == NULL)
-        return 0;
-
-    deleteBQueue(ca->queueCustomers, NULL);
-
-    if (pthread_mutex_destroy(&ca->accessQueue) != 0 ||
-        pthread_mutex_destroy(&ca->accessState) != 0 ||
-        pthread_mutex_destroy(&ca->accessLogInfo) != 0)
-    {
-        MOD_PERROR("pthread_mutex_destroy");
-        free(ca);
-        return -1;
-    }
-
-    free(ca);
-    return 0;
 }
 
 /* Parse time required to process a single product,
     from the configuration file. Return 0 on errors. */
 static unsigned int parseTimeProd()
 {
-    unsigned int timeProd;
+    unsigned int timeProd = 0;
     FILE* fp;
     char *buf, *tok;
-    char debug_str[50];
+    //char debug_str[50];
 
     buf = (char*) malloc(MAX_LINE * sizeof(char));
-    if (buf == NULL)
+    if (!buf)
     {
         MOD_PERROR("malloc");
         return 0;
@@ -95,7 +50,7 @@ static unsigned int parseTimeProd()
 
     pthread_mutex_lock(&configAccess);
     fp = fopen(CONFIG_FILENAME, "r");
-    if (fp == NULL)
+    if (!fp)
     {
         pthread_mutex_unlock(&configAccess);
         MOD_PERROR("fopen");
@@ -115,7 +70,7 @@ static unsigned int parseTimeProd()
     pthread_mutex_unlock(&configAccess);
 
     tok = strtok(buf, " ");
-    while (tok != NULL)
+    while (tok)
     {
         // Next element is timeProd
         if (strcmp(tok, ":") == 0)
@@ -136,8 +91,8 @@ static unsigned int parseTimeProd()
                 return 0;
             }
 
-            sprintf(debug_str, "timeProd is %d", timeProd);
-            LOG_DEBUG(debug_str);
+            //sprintf(debug_str, "timeProd is %d", timeProd);
+            //LOG_DEBUG(debug_str);
         }
         else
             tok = strtok(NULL, " ");
@@ -179,13 +134,12 @@ void* CashierP(void *c)
     while(is_open(ca))   
     {
         // Pop a customer from the queue
-        pthread_mutex_lock(&ca->accessQueue);
         cu = pop(ca->queueCustomers);
-        pthread_mutex_unlock(&ca->accessQueue);
 
         // NULL customer, close immediately the cashier
-        if (cu == NULL)
+        if (!cu)
         {
+            LOG_DEBUG("Null customer encountered.")
             break;
         }
 
@@ -223,7 +177,7 @@ void* CashierP(void *c)
     if (ca->totNCustomer == 0)
     {
         pthread_mutex_unlock(&ca->accessLogInfo);
-        MOD_PERROR("division by zero");
+        LOG_ERROR("division by zero");
         goto error;
     }
 
@@ -239,6 +193,5 @@ void* CashierP(void *c)
 
 error:
 
-    // ca->nClose += 1
     pthread_exit(0);
 }
