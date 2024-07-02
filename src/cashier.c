@@ -13,17 +13,20 @@
 #include "glob.h"
 #include "../lib/logger.h"
 
-// TODO: check the entire file
-
 /* Check if the cashiers is open (concurrent safe).
     Return true if it is open, false otherwise */
 static bool is_open (Cashier_t* ca)
 {
-    bool result = false;
+    bool result;
+
+    if (!ca)
+    {
+        LOG_ERROR("ca is NULL");
+        return false;
+    }
 
     pthread_mutex_lock(&ca->accessState);
-    if (ca->open)
-        result = true;
+    result = ca->open;
     pthread_mutex_unlock(&ca->accessState);
     
     return result;
@@ -39,7 +42,7 @@ static unsigned int parseTimeProd()
     //char debug_str[50];
 
     buf = (char*) malloc(MAX_LINE * sizeof(char));
-    if (buf == NULL)
+    if (!buf)
     {
         MOD_PERROR("malloc");
         return 0;
@@ -47,7 +50,7 @@ static unsigned int parseTimeProd()
 
     pthread_mutex_lock(&configAccess);
     fp = fopen(CONFIG_FILENAME, "r");
-    if (fp == NULL)
+    if (!fp)
     {
         pthread_mutex_unlock(&configAccess);
         MOD_PERROR("fopen");
@@ -67,7 +70,7 @@ static unsigned int parseTimeProd()
     pthread_mutex_unlock(&configAccess);
 
     tok = strtok(buf, " ");
-    while (tok != NULL)
+    while (tok)
     {
         // Next element is timeProd
         if (strcmp(tok, ":") == 0)
@@ -131,12 +134,10 @@ void* CashierP(void *c)
     while(is_open(ca))   
     {
         // Pop a customer from the queue
-        pthread_mutex_lock(&ca->accessQueue);
         cu = pop(ca->queueCustomers);
-        pthread_mutex_unlock(&ca->accessQueue);
 
         // NULL customer, close immediately the cashier
-        if (cu == NULL)
+        if (!cu)
         {
             LOG_DEBUG("Null customer encountered.")
             break;
@@ -176,7 +177,7 @@ void* CashierP(void *c)
     if (ca->totNCustomer == 0)
     {
         pthread_mutex_unlock(&ca->accessLogInfo);
-        MOD_PERROR("division by zero");
+        LOG_ERROR("division by zero");
         goto error;
     }
 
@@ -192,6 +193,5 @@ void* CashierP(void *c)
 
 error:
 
-    // ca->nClose += 1
     pthread_exit(0);
 }

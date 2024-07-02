@@ -32,7 +32,7 @@ static int writeLogCustomer(unsigned int nQueue, unsigned int nProd,
 
     pthread_mutex_lock(&logAccess);
     fp = fopen(LOG_FILENAME, "a");
-    if (fp == NULL)
+    if (!fp)
     {
         pthread_mutex_unlock(&logAccess);
         MOD_PERROR("fopen");
@@ -48,35 +48,38 @@ static int writeLogCustomer(unsigned int nQueue, unsigned int nProd,
 }
 
 /* Loop through all the open cashiers and pick the line with less customers,
-    if the choosen cashier is equal to the current one (c), the function returns 0, 1 otherwise.
+    if the choosen cashier is equal to the current one (c), the function returns 0, 1 otherwise. 2 for errors.
 
     Assumption: at least one register is open, take the risk of picking a line that could be closed in the meantime. */
 static unsigned int chooseCashier (Cashier_t* currentCa)
 {
     Cashier_t* pastCa = currentCa;
 
-    if (pastCa == NULL)
+    if (!currentCa)
     {
-        currentCa = cashiers[0];
-        pastCa = currentCa;
+        for (int i = 0; i < K; i++)
+        {
+            if (cashiers[i]->queueCustomers)
+            {
+                currentCa = cashiers[i];
+                pastCa = currentCa;
+            }
+        }
+
+        if (!currentCa)
+            return 2;
     }
 
-    pthread_mutex_lock(&currentCa->accessQueue);
     for (int i = 0; i < K; i++)
     {
         // No mutex: tradeoff performance-optimal result
         if (cashiers[i]->queueCustomers != NULL)
         {
-            if (cashiers[i]->queueCustomers->qlen < \
-                currentCa->queueCustomers->qlen)
-            {
-                pthread_mutex_unlock(&currentCa->accessQueue);
+            if (getLength(cashiers[i]->queueCustomers) < \
+                    getLength(currentCa->queueCustomers))
                 currentCa = cashiers[i];
-                pthread_mutex_lock(&currentCa->accessQueue);
-            }
         }
     }
-    pthread_mutex_unlock(&currentCa->accessQueue);
 
     if (currentCa != pastCa)
         return 1;
@@ -86,6 +89,12 @@ static unsigned int chooseCashier (Cashier_t* currentCa)
 
 int init_customer(Customer_t *cu)
 {
+    if (!cu)
+    {
+        LOG_ERROR("cu is NULL.");
+        return -1;
+    }
+
     if (pthread_mutex_init(&cu->mutexC, NULL) != 0 ||
         pthread_mutex_init(&cu->accessState, NULL) != 0)
     {
@@ -110,7 +119,7 @@ int init_customer(Customer_t *cu)
 
 int destroy_customer(Customer_t *cu)
 {
-    if (cu == NULL)
+    if (!cu)
         return 0;
 
     if (pthread_mutex_destroy(&cu->mutexC) != 0 ||
@@ -159,13 +168,9 @@ void* CustomerP(void *c)
     // Did you have zero product? Notify director
     if (cu->nProd == 0)
     {
-        // Why not a broadcast??
         pthread_mutex_lock(&gateCustomers);
         nCustomerWaiting += 1;
-        while (gateClosed)
-           pthread_cond_wait(&exitCustomers, &gateCustomers);
-    
-        gateClosed = true; // remove
+        pthread_cond_wait(&exitCustomers, &gateCustomers);
         nCustomerWaiting -= 1;
         pthread_mutex_unlock(&gateCustomers);
     }
@@ -181,18 +186,20 @@ void* CustomerP(void *c)
             if (ret == 1) 
             {
                 nQueue += 1;
-                pthread_mutex_lock(&ca->accessQueue);
-                if (ca->queueCustomers == NULL ||
+                if (!ca->queueCustomers ||
                         push(ca->queueCustomers, cu) == -1)
                 {
-                    LOG_ERROR("The cashier has been closed");
-                    pthread_mutex_unlock(&ca->accessQueue);
+                    LOG_ERROR("The cashier has been closed, unable to push.");
                     nQueue -= 1;
                     continue;
                 }
-                pthread_mutex_unlock(&ca->accessQueue);
             }
-                
+            else if (ret == 2)
+            {   
+                LOG_ERROR("Couldn't find an open cashier.");
+                goto error;
+            }
+
             // Wait your turn and after some time check new line
             pthread_mutex_lock(&cu->mutexC); 
             clock_gettime(CLOCK_MONOTONIC, &ts_checkqueue);
@@ -200,7 +207,7 @@ void* CustomerP(void *c)
 
             ret = 0;
             while(!cu->yourTurn && ret != ETIMEDOUT)
-                pthread_cond_timedwait(&cu->startTurn, &cu->mutexC, &ts_checkqueue);
+                ret = pthread_cond_timedwait(&cu->startTurn, &cu->mutexC, &ts_checkqueue);
 
             if (cu->yourTurn)
             {
@@ -212,6 +219,13 @@ void* CustomerP(void *c)
                 pthread_mutex_unlock(&cu->mutexC);
                 continue;
             }
+            else
+            {
+                MOD_PERROR("pthread_cond_timedwait");
+                pthread_mutex_unlock(&cu->mutexC);
+                goto error;
+            }
+
             pthread_mutex_unlock(&cu->mutexC);
 
             // The cashier is processing your products 
@@ -253,7 +267,7 @@ error:
     pthread_mutex_unlock(&cu->accessState);
     
     // Free customer data
-    destroy_customer(cu);
+    destroy_customer(cu); // FIXME: can we reuse the same structure if the pointer is freed?
 
     pthread_exit(0);
 }
