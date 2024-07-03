@@ -464,7 +464,7 @@ void *SupermarketP(void* a)
 
     // Initialize cashiers' data
     cashiers = (Cashier_t**) malloc(K*sizeof(Cashier_t*));
-    if (cashiers == NULL)
+    if (!cashiers)
     {
         MOD_PERROR("malloc");
         goto error;
@@ -473,7 +473,7 @@ void *SupermarketP(void* a)
     for (int i = 0; i < K; i++)
     {
         cashiers[i] = (Cashier_t *) malloc(sizeof(Cashier_t));
-        if (cashiers[i] == NULL)
+        if (!cashiers[i])
         {
             MOD_PERROR("malloc");
             pthread_exit(0);

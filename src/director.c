@@ -149,7 +149,7 @@ static int openCashier(Cashier_t *ca)
     pthread_t thCa;
     int ret;
 
-    if (ca == NULL)
+    if (!ca)
     {
         LOG_ERROR("ca is NULL");
         return -1;
@@ -199,14 +199,9 @@ static int checkCashierSituation(unsigned int S1, unsigned int S2,
             been met -> open cashier */
         if (!cashiers[i]->open && found)
         {
+            pthread_mutex_unlock(&cashiers[i]->accessState);
             ret = openCashier(cashiers[i]);
-            if (ret != 0)
-            {
-                pthread_mutex_unlock(&cashiers[i]->accessState);
-                return -1;
-            }
-
-            return 0;
+            return ret;
         }
         /* cashier is closed and the conditions have
             not been satisfied yet -> save cashier for
@@ -230,10 +225,11 @@ static int checkCashierSituation(unsigned int S1, unsigned int S2,
         // Conditions satisfied, open a cashier
         if (countS1 >= S1 || countS2 >= 1)
         {
-            LOG_DEBUG("Conditions satisfied, opening cashier.");
             found = true;
-            if (closed_cashier != NULL)
+            if (closed_cashier)
             {
+                LOG_DEBUG("Conditions satisfied, opening cashier.");
+
                 ret = openCashier(closed_cashier);
                 return ret;
             }
