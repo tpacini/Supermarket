@@ -21,7 +21,7 @@ static bool is_open (Cashier_t* ca)
 
     if (!ca)
     {
-        LOG_ERROR("ca is NULL");
+        LOG_FATAL("ca is NULL");
         return false;
     }
 
@@ -119,6 +119,12 @@ void* CashierP(void *c)
     ts_sTime.tv_sec = 0;
     ts_sTime.tv_nsec = 0;
 
+    if (!ca)
+    {
+        LOG_FATAL("ca is NULL");
+        goto error;
+    }
+
     // Retrieve parameter from configuration file
     timeProd = parseTimeProd();
     if (timeProd == 0)
@@ -130,12 +136,12 @@ void* CashierP(void *c)
     // Set time of opening
     clock_gettime(CLOCK_MONOTONIC, &ts_start);
 
-    // Start handling customers
+    LOG_DEBUG("Start handling customers.");
     while(is_open(ca))   
     {
         // Pop a customer from the queue
         cu = pop(ca->queueCustomers);
-
+        
         // NULL customer, close immediately the cashier
         if (!cu)
         {
@@ -177,7 +183,7 @@ void* CashierP(void *c)
     if (ca->totNCustomer == 0)
     {
         pthread_mutex_unlock(&ca->accessLogInfo);
-        LOG_ERROR("division by zero");
+        LOG_FATAL("division by zero");
         goto error;
     }
 
@@ -190,6 +196,7 @@ void* CashierP(void *c)
     ca->timeOpen = add_ts(ca->timeOpen, ts_tot);
     ca->nClose += 1;
     pthread_mutex_unlock(&ca->accessLogInfo);
+    LOG_DEBUG("Saved log data before leaving.");
 
 error:
 

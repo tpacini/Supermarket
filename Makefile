@@ -32,17 +32,28 @@ clean:
 	@rm -f src/*.o lib/*.o lib/*.so
 	@rm -f director
 test1:
-	@export LD_LIBRARY_PATH=/home/ranxerox/Documenti/Supermarket/lib:$LD_LIBRARY_PATH
 	@./director 2 20 5 500 80 30 & 
 	@sleep 15
 	@killall -s SIGHUP director
+	@tail --pid=$$(pidof director) -f /dev/null
 	@echo "Done!"
 
 test2:
 	@./director 6 50 3 200 100 20 & 
 	@sleep 25
-	@killall -s SIGHUP director
+	@killall -s SIGQUIT director
+	@tail --pid=$$(pidof director) -f /dev/null
 	@echo "Done!"
-# @chmod +x analisi.sh
-# @./analisi.sh
 
+test3:
+	@./director 2 20 5 500 80 30 & 
+	@sleep 25
+	@killall -s SIGQUIT director
+	@tail --pid=$$(pidof director) -f /dev/null
+	@echo "Done!"
+	@chmod +x analisi.sh
+	@./analisi.sh
+
+
+#export LD_LIBRARY_PATH=/home/ranxerox/Documenti/Supermarket/lib:$LD_LIBRARY_PATH
+	

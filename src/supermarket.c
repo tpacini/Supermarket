@@ -283,20 +283,47 @@ int init_cashier(Cashier_t *ca)
 
 int destroy_cashier(Cashier_t *ca)
 {
+    unsigned int error = 0;
+
     if (ca == NULL)
         return 0;
 
-    deleteBQueue(ca->queueCustomers, NULL);
-
-    if (pthread_mutex_destroy(&ca->accessState) != 0 ||
-        pthread_mutex_destroy(&ca->accessLogInfo) != 0)
+    if (pthread_mutex_trylock(&ca->accessState) == 0)
     {
-        MOD_PERROR("pthread_mutex_destroy");
-        free(ca);
-        return -1;
+        pthread_mutex_unlock(&ca->accessState);
+        if (pthread_mutex_destroy(&ca->accessState) != 0)
+        {
+            MOD_PERROR("pthread_mutex_destroy");
+            error = 1;
+        }
+    }
+    else
+    {
+        MOD_PERROR("pthread_mutex_trylock");
+        error = 1;
     }
 
+    if (pthread_mutex_trylock(&ca->accessLogInfo) == 0)
+    {
+        pthread_mutex_unlock(&ca->accessLogInfo);
+        if (pthread_mutex_destroy(&ca->accessLogInfo) != 0)
+        {
+            MOD_PERROR("pthread_mutex_destroy");
+            error = 1;
+        }
+    }
+    else
+    {
+        MOD_PERROR("pthread_mutex_destroy");
+        error = 1;
+    }
+
+    deleteBQueue(ca->queueCustomers, NULL);
+
     free(ca);
+    if (error)
+        return -1;
+
     return 0;
 }
 
@@ -437,7 +464,7 @@ void *SupermarketP(void* a)
 
     // Initialize cashiers' data
     cashiers = (Cashier_t**) malloc(K*sizeof(Cashier_t*));
-    if (cashiers == NULL)
+    if (!cashiers)
     {
         MOD_PERROR("malloc");
         goto error;
@@ -446,7 +473,7 @@ void *SupermarketP(void* a)
     for (int i = 0; i < K; i++)
     {
         cashiers[i] = (Cashier_t *) malloc(sizeof(Cashier_t));
-        if (cashiers[i] == NULL)
+        if (!cashiers[i])
         {
             MOD_PERROR("malloc");
             pthread_exit(0);
@@ -613,23 +640,12 @@ void *SupermarketP(void* a)
             }
 
             // Terminate customers' threads
-            if (strcmp(buf, SIGQUIT_STR) == 0) // FIXME: this state is not correct, can cause several issues. Solution: let the customer handle the SIGTERM???
+            if (strcmp(buf, SIGQUIT_STR) == 0)
             {
                 LOG_DEBUG("Read SIGQUIT signal.");
 
                 for (int i = 0; i < C; i++)
-                {
-                    ret = pthread_kill(customers[i]->id, SIGTERM); // FIXME: if the customers have locked mutex??? if SIGQUIT
-                                                                   //        doesn't destroy mutex???
-                    if (ret != 0)
-                    {
-                        MOD_PERROR("pthread_kill");
-                        goto error;
-                    }
-                    destroy_customer(customers[i]);
-                }
-
-                free(customers);
+                    pthread_kill(customers[i]->id, SIGTERM);
             }
             else // wait customer termination
             {
@@ -670,24 +686,13 @@ error:
     if (buf != NULL)
         free(buf);
 
-    if (cashiers != NULL)
-    {
-        for (int i = 0; i < K; i++)
-        {
-            destroy_cashier(cashiers[i]); // FIXME: there should be a quick way to kill all the cashiers, like pthread_kill and then destroy
-        }
-
-        free(cashiers);
-    }
-
     if (customers != NULL)
     {
         for (int i = 0; i < C; i++)
         {
-            ret = pthread_kill(customers[i]->id, SIGTERM);
-            if (ret != 0)
-                LOG_FATAL("Unable to kill customer.");
-
+            pthread_mutex_lock(&customers[i]->accessState);
+            customers[i]->running = 0;
+            pthread_mutex_unlock(&customers[i]->accessState);
             ret = destroy_customer(customers[i]);
             if (ret != 0)
                 LOG_FATAL("Unable to destroy customer's data.");
@@ -696,16 +701,29 @@ error:
         free(customers);
     }
 
+    if (cashiers != NULL)
+    {
+        for (int i = 0; i < K; i++)
+        {
+            pthread_mutex_lock(&cashiers[i]->accessState);
+            cashiers[i]->open = false;
+            push(cashiers[i]->queueCustomers, NULL);
+            pthread_mutex_unlock(&cashiers[i]->accessState);
+            destroy_cashier(cashiers[i]);
+        }
 
-
-    pthread_mutex_destroy(&numCu);
-    pthread_mutex_destroy(&logAccess);
-    pthread_mutex_destroy(&configAccess); // FIXME: if it is locked or used by condwait???
+        free(cashiers);
+    }
 
     // TODO: NOTIFY DIRECTOR OF THE ERROR
 
     // TODO: different seed for every thread which used rand_r
     // TODO: fix log data due to errors in project's requirements
+
+    // NOTE: they can be locked or used by some thread
+    pthread_mutex_destroy(&numCu);
+    pthread_mutex_destroy(&logAccess);
+    pthread_mutex_destroy(&configAccess);
 
     LOG_DEBUG("Closing Supermarket.");
 
