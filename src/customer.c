@@ -49,9 +49,8 @@ static int writeLogCustomer(unsigned int nQueue, unsigned int nProd,
 
 /* Loop through all the open cashiers and pick the line with less customers,
     if new cashier has been selected returns 1, 2 for errors, 0 otherwise. */
-static unsigned int chooseCashier (Cashier_t* currentCa)
+static Cashier_t* chooseCashier (Cashier_t* currentCa)
 {
-    Cashier_t* pastCa;
     bool open;
     unsigned int start = 0;
     int len1, len2;
@@ -59,7 +58,7 @@ static unsigned int chooseCashier (Cashier_t* currentCa)
     if (!currentCa) 
     {
         // Pick first open cashier
-        for (int i = 0; i < K; i++)
+        for (unsigned int i = 0; i < K; i++)
         {
             pthread_mutex_lock(&cashiers[i]->accessState);
             open = cashiers[i]->open;
@@ -68,7 +67,6 @@ static unsigned int chooseCashier (Cashier_t* currentCa)
             if (open)
             {
                 currentCa = cashiers[i];
-                pastCa = currentCa;
                 start = i;
                 break;
             }
@@ -78,7 +76,7 @@ static unsigned int chooseCashier (Cashier_t* currentCa)
 
     // No cashier open
     if (!currentCa)
-        return 2;
+        return NULL;
 
     for (unsigned int i = start; i < K; i++)
     {
@@ -94,10 +92,7 @@ static unsigned int chooseCashier (Cashier_t* currentCa)
         }
     }
 
-    if (currentCa != pastCa)
-        return 1;
-    
-    return 0;
+    return currentCa;
 }
 
 int init_customer(Customer_t *cu)
@@ -191,6 +186,7 @@ void* CustomerP(void *c)
 
     /* General variables */
     Customer_t *cu = (Customer_t *)c;   // current customer data structure
+    Cashier_t *new_ca = NULL;
     Cashier_t *ca = NULL;               // current cashier data structure
     unsigned int nQueue = 0;            // number of queues visited
     unsigned int timeToBuy;             // time to buy products
@@ -223,10 +219,16 @@ void* CustomerP(void *c)
             switch(state)
             {
                 case 0:
-                    ret = chooseCashier(ca);
-                    if (ret == 1)
+                    new_ca = chooseCashier(ca);
+                    if (!new_ca)
+                    {
+                        LOG_FATAL("Couldn't find a first (open) cashier.");
+                        goto error;
+                    }
+                    else if (new_ca != ca)
                     {
                         LOG_DEBUG("Queue picked or changed.");
+                        ca = new_ca;
                         nQueue += 1;
                         if (!ca->queueCustomers ||
                             push(ca->queueCustomers, cu) == -1)
@@ -236,11 +238,6 @@ void* CustomerP(void *c)
                         }
                         else
                             state = 1;
-                    }
-                    else if (ret == 2)
-                    {
-                        LOG_FATAL("Couldn't find a first (open) cashier.");
-                        goto error;
                     }
                     else // queue unchanged
                         state = 1;
