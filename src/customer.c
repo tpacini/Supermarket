@@ -22,7 +22,7 @@ static int writeLogCustomer(unsigned int nQueue, unsigned int nProd,
     unsigned int timeInside = timeToBuy + timeQueue;
 
     logMsg = (char *) malloc((10 * 4 + 3 + 1) * sizeof(char));
-    if (logMsg == NULL)
+    if (!logMsg)
     {
         MOD_PERROR("malloc");
         return -1;
@@ -48,12 +48,10 @@ static int writeLogCustomer(unsigned int nQueue, unsigned int nProd,
 }
 
 /* Loop through all the open cashiers and pick the line with less customers,
-    if the choosen cashier is equal to the current one (c), the function returns 0, 1 otherwise. 2 for errors.
-
-    Assumption: at least one register is open, take the risk of picking a line that could be closed in the meantime. */
+    if new cashier has been selected returns 1, 2 for errors, 0 otherwise. */
 static unsigned int chooseCashier (Cashier_t* currentCa)
 {
-    Cashier_t* pastCa = currentCa;
+    Cashier_t* pastCa;
     bool open;
     unsigned int start = 0;
     int len1, len2;
@@ -78,6 +76,10 @@ static unsigned int chooseCashier (Cashier_t* currentCa)
         }
     }
 
+    // No cashier open
+    if (!currentCa)
+        return 2;
+
     for (unsigned int i = start; i < K; i++)
     {
         pthread_mutex_lock(&cashiers[i]->accessState);
@@ -94,8 +96,6 @@ static unsigned int chooseCashier (Cashier_t* currentCa)
 
     if (currentCa != pastCa)
         return 1;
-    else if (!currentCa->queueCustomers)
-        return 2;
     
     return 0;
 }
@@ -218,38 +218,34 @@ void* CustomerP(void *c)
     else
     {
         clock_gettime(CLOCK_MONOTONIC, &ts_start);
-        LOG_DEBUG("Customer running.");
         while (cu->running)
         {
             switch(state)
             {
                 case 0:
                     ret = chooseCashier(ca);
-                    if (ret == 1) // queue picked or changed
+                    if (ret == 1)
                     {
                         LOG_DEBUG("Queue picked or changed.");
                         nQueue += 1;
                         if (!ca->queueCustomers ||
                             push(ca->queueCustomers, cu) == -1)
                         {
-                            LOG_ERROR("The cashier has been closed, unable to push.");
-                            nQueue -= 1;
+                            LOG_FATAL("The cashier has been closed, unable to push.");
+                            goto error;
                         }
                         else
                             state = 1;
                     }
-                    else if (ret == 2) // error
+                    else if (ret == 2)
                     {
                         LOG_FATAL("Couldn't find a first (open) cashier.");
                         goto error;
                     }
                     else // queue unchanged
                         state = 1;
-                    
                     break;
                 case 1:
-                    //LOG_DEBUG("State 1.");
-
                     // Wait your turn and after some time check new line
                     pthread_mutex_lock(&cu->mutexC);
                     clock_gettime(CLOCK_MONOTONIC, &ts_checkqueue);
@@ -276,10 +272,9 @@ void* CustomerP(void *c)
                         goto error;
                     }
                     pthread_mutex_unlock(&cu->mutexC);
-
                     break;
                 case 2:
-                    LOG_DEBUG("Waiting for cashier to finish product processing.");
+                    LOG_DEBUG("Waiting for cashier to finish processing.");
                     pthread_mutex_lock(&cu->mutexC);
                     while (!cu->productProcessed)
                         pthread_cond_wait(&cu->finishedTurn, &cu->mutexC);
@@ -293,9 +288,7 @@ void* CustomerP(void *c)
                     state = 3;
                     break;
                 case 3:
-                    LOG_DEBUG("State 3.");
-
-                    // Write into log file
+                    LOG_DEBUG("Writing statistics to log.");
                     ret = writeLogCustomer(nQueue, cu->nProd, timeToBuy,
                                            timespec_to_ms(ts_queue));
                     if (ret != 0)
@@ -312,9 +305,7 @@ void* CustomerP(void *c)
                     state = 4;
                     break;
                 case 4:
-                    LOG_DEBUG("State 4.");
-
-                    // Task successfully completed
+                    LOG_DEBUG("Customer routine successfully completed.");
                     goto error;
                 default:
                     LOG_FATAL("Wrong state reached.");
