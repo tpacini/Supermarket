@@ -21,14 +21,15 @@ static int writeLogCustomer(unsigned int nQueue, unsigned int nProd,
     FILE *fp;
     unsigned int timeInside = timeToBuy + timeQueue;
 
-    logMsg = (char *) malloc((10 * 4 + 3 + 1) * sizeof(char));
+    logMsg = (char *) malloc((10 * 4 + 3 + 2) * sizeof(char));
     if (!logMsg)
     {
         MOD_PERROR("malloc");
         return -1;
     }
-    sprintf(logMsg, "%10u %10u %10u %10u", timeInside, timeQueue, 
+    sprintf(logMsg, "%10u %10u %10u %10u\n", timeInside, timeQueue, 
                                 nQueue, nProd);
+    LOG_DEBUG(logMsg);
 
     pthread_mutex_lock(&logAccess);
     fp = fopen(LOG_FILENAME, "a");
@@ -214,6 +215,7 @@ void* CustomerP(void *c)
     else
     {
         clock_gettime(CLOCK_MONOTONIC, &ts_start);
+        LOG_DEBUG("Customer running.");
         while (cu->running)
         {
             switch(state)
@@ -271,7 +273,6 @@ void* CustomerP(void *c)
                     pthread_mutex_unlock(&cu->mutexC);
                     break;
                 case 2:
-                    LOG_DEBUG("Waiting for cashier to finish processing.");
                     pthread_mutex_lock(&cu->mutexC);
                     while (!cu->productProcessed)
                         pthread_cond_wait(&cu->finishedTurn, &cu->mutexC);

@@ -21,7 +21,7 @@ static bool is_open (Cashier_t* ca)
 
     if (!ca)
     {
-        LOG_ERROR("ca is NULL");
+        LOG_FATAL("ca is NULL");
         return false;
     }
 
@@ -119,6 +119,12 @@ void* CashierP(void *c)
     ts_sTime.tv_sec = 0;
     ts_sTime.tv_nsec = 0;
 
+    if (!ca)
+    {
+        LOG_FATAL("ca is NULL");
+        goto error;
+    }
+
     // Retrieve parameter from configuration file
     timeProd = parseTimeProd();
     if (timeProd == 0)
@@ -135,8 +141,7 @@ void* CashierP(void *c)
     {
         // Pop a customer from the queue
         cu = pop(ca->queueCustomers);
-        LOG_DEBUG("Pop customer.");
-
+        
         // NULL customer, close immediately the cashier
         if (!cu)
         {
@@ -178,7 +183,7 @@ void* CashierP(void *c)
     if (ca->totNCustomer == 0)
     {
         pthread_mutex_unlock(&ca->accessLogInfo);
-        LOG_ERROR("division by zero");
+        LOG_FATAL("division by zero");
         goto error;
     }
 
