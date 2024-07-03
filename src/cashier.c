@@ -130,11 +130,12 @@ void* CashierP(void *c)
     // Set time of opening
     clock_gettime(CLOCK_MONOTONIC, &ts_start);
 
-    // Start handling customers
+    LOG_DEBUG("Start handling customers.");
     while(is_open(ca))   
     {
         // Pop a customer from the queue
         cu = pop(ca->queueCustomers);
+        LOG_DEBUG("Pop customer.");
 
         // NULL customer, close immediately the cashier
         if (!cu)
@@ -190,6 +191,7 @@ void* CashierP(void *c)
     ca->timeOpen = add_ts(ca->timeOpen, ts_tot);
     ca->nClose += 1;
     pthread_mutex_unlock(&ca->accessLogInfo);
+    LOG_DEBUG("Saved log data before leaving.");
 
 error:
 

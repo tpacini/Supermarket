@@ -416,7 +416,7 @@ int main(int argc, char *argv[])
      * */
     wait_signal.tv_sec = 0;
     wait_signal.tv_nsec = 150 * 1000000; // 150 ms
-    while (sigrecv != SIGHUP || sigrecv != SIGQUIT)
+    while (sigrecv != SIGHUP && sigrecv != SIGQUIT)
     {
         errno = 0;
         if ((sigrecv = sigtimedwait(&set, 
