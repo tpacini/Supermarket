@@ -128,12 +128,26 @@ int init_customer(Customer_t *cu)
 
 int destroy_customer(Customer_t *cu)
 {
-    unsigned int error = 0;
+    unsigned int error = 0, count = 0;
+    int ret = 0;
 
     if (!cu)
         return 0;
 
-    if (pthread_mutex_trylock(&cu->mutexC) == 0)
+    ret = pthread_mutex_trylock(&cu->mutexC);
+    while (ret != 0 && count < 100)
+    {
+        ret = pthread_mutex_trylock(&cu->mutexC);
+        count += 1;
+    }
+
+    if (count == 100)
+    {
+        LOG_ERROR("pthread_mutex_trylock");
+        error = 1;
+        count = 0;
+    }
+    else
     {
         pthread_mutex_unlock(&cu->mutexC);
         if (pthread_mutex_destroy(&cu->mutexC) != 0)
@@ -142,13 +156,21 @@ int destroy_customer(Customer_t *cu)
             error = 1;
         }
     }
-    else
+    
+    ret = pthread_mutex_trylock(&cu->accessState);
+    while (ret != 0 && count < 100)
     {
-        MOD_PERROR("pthread_mutex_trylock");
-        error = 1;
+        ret = pthread_mutex_trylock(&cu->accessState);
+        count += 1;
     }
 
-    if (pthread_mutex_trylock(&cu->accessState) == 0)
+    if (count == 100)
+    {
+        LOG_ERROR("pthread_mutex_trylock");
+        error = 1;
+        count = 0;
+    }
+    else
     {
         pthread_mutex_unlock(&cu->accessState);
         if (pthread_mutex_destroy(&cu->accessState) != 0)
@@ -156,11 +178,6 @@ int destroy_customer(Customer_t *cu)
             MOD_PERROR("pthread_mutex_destroy");
             error = 1;
         }
-    }
-    else
-    {
-        MOD_PERROR("pthread_mutex_trylock");
-        error = 1;
     }
 
     if (pthread_cond_destroy(&cu->finishedTurn) != 0 ||
@@ -313,13 +330,12 @@ void* CustomerP(void *c)
     }
 
 error:
-    // Decrease number of customers inside supermarket
     pthread_mutex_lock(&numCu);
-    currentNCustomer -= 1;
-    pthread_mutex_unlock(&numCu);
     pthread_mutex_lock(&cu->accessState);
+    currentNCustomer -= 1;
     cu->running = 0;
     pthread_mutex_unlock(&cu->accessState);
-
+    pthread_mutex_unlock(&numCu);
+    
     pthread_exit(0);
 }
