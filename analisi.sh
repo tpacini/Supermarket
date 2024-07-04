@@ -3,11 +3,7 @@
 pid=$(pidof director)
 lsof -p $pid +r 1 &>/dev/null
 
-# Obtain log filename
-string=$(tail -1 lib/config.txt)
-IFS=' : '
-tokens=( $string )
-filename=${tokens[3]}
+filename='log.txt'
 
 # Compute log's lines
 lines=$(wc -l $filename)
