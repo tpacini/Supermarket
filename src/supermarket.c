@@ -185,6 +185,7 @@ static int waitCustomerTerm()
 {
     unsigned int c = 0;
     struct timespec timeout;
+    char deb[5];
 
     clock_gettime(CLOCK_MONOTONIC, &timeout);
     timeout.tv_sec = 0;
@@ -195,6 +196,8 @@ static int waitCustomerTerm()
         pthread_mutex_lock(&numCu);
         c = currentNCustomer;
         pthread_mutex_unlock(&numCu);
+        sprintf(deb, "%d\n", c);
+        LOG_DEBUG(deb);
         
         if (c == 0)
             break;
@@ -283,12 +286,26 @@ int init_cashier(Cashier_t *ca)
 
 int destroy_cashier(Cashier_t *ca)
 {
-    unsigned int error = 0;
+    unsigned int error = 0, count = 0;
+    int ret = 0;
 
-    if (ca == NULL)
+    if (!ca)
         return 0;
 
-    if (pthread_mutex_trylock(&ca->accessState) == 0)
+    ret = pthread_mutex_trylock(&ca->accessState);
+    while (ret != 0 && count < 100)
+    {
+        ret = pthread_mutex_trylock(&ca->accessState);
+        count += 1;
+    }
+
+    if (count == 100)
+    {
+        LOG_ERROR("pthread_mutex_trylock");
+        error = 1;
+        count = 0;
+    }
+    else
     {
         pthread_mutex_unlock(&ca->accessState);
         if (pthread_mutex_destroy(&ca->accessState) != 0)
@@ -297,13 +314,21 @@ int destroy_cashier(Cashier_t *ca)
             error = 1;
         }
     }
-    else
+
+    ret = pthread_mutex_trylock(&ca->accessLogInfo);
+    while (ret != 0 && count < 100)
     {
-        MOD_PERROR("pthread_mutex_trylock");
-        error = 1;
+        ret = pthread_mutex_trylock(&ca->accessLogInfo);
+        count += 1;
     }
 
-    if (pthread_mutex_trylock(&ca->accessLogInfo) == 0)
+    if (count == 100)
+    {
+        LOG_ERROR("pthread_mutex_trylock");
+        error = 1;
+        count = 0;
+    }
+    else
     {
         pthread_mutex_unlock(&ca->accessLogInfo);
         if (pthread_mutex_destroy(&ca->accessLogInfo) != 0)
@@ -311,11 +336,6 @@ int destroy_cashier(Cashier_t *ca)
             MOD_PERROR("pthread_mutex_destroy");
             error = 1;
         }
-    }
-    else
-    {
-        MOD_PERROR("pthread_mutex_destroy");
-        error = 1;
     }
 
     deleteBQueue(ca->queueCustomers, NULL);
@@ -463,6 +483,7 @@ void *SupermarketP(void* a)
     pthread_mutex_unlock(&numCu);
 
     // Initialize cashiers' data
+    cashiers = NULL;
     cashiers = (Cashier_t**) malloc(K*sizeof(Cashier_t*));
     if (!cashiers)
     {
@@ -513,6 +534,7 @@ void *SupermarketP(void* a)
     LOG_DEBUG("Cashiers started.");
 
     // Initialize customers' data
+    customers = NULL;
     customers = (Customer_t **)malloc(C * sizeof(Customer_t *));
     if (customers == NULL)
     {
@@ -663,6 +685,7 @@ void *SupermarketP(void* a)
         }
     }
     free(buf);
+    buf = NULL;
 
     ret = waitCashierTerm();
     if (ret != 0)
@@ -683,10 +706,10 @@ void *SupermarketP(void* a)
     LOG_DEBUG("Saved information to log.");
     
 error:
-    if (buf != NULL)
+    if (buf)
         free(buf);
 
-    if (customers != NULL)
+    if (customers)
     {
         for (int i = 0; i < C; i++)
         {
@@ -697,11 +720,10 @@ error:
             if (ret != 0)
                 LOG_FATAL("Unable to destroy customer's data.");
         }
-
         free(customers);
     }
 
-    if (cashiers != NULL)
+    if (cashiers)
     {
         for (int i = 0; i < K; i++)
         {
@@ -709,9 +731,10 @@ error:
             cashiers[i]->open = false;
             push(cashiers[i]->queueCustomers, NULL);
             pthread_mutex_unlock(&cashiers[i]->accessState);
-            destroy_cashier(cashiers[i]);
+            ret = destroy_cashier(cashiers[i]);
+            if (ret != 0)
+                LOG_FATAL("Unable to destroy cashier's data.");
         }
-
         free(cashiers);
     }
 
