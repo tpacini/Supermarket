@@ -263,7 +263,6 @@ int main(int argc, char *argv[])
     pthread_t thSu;                 // identifier for supermarket thread
     struct timespec wait_signal;    // main loop waiting time
 
-    /* VARIABLE INITIALIZATION AND ARGUMENT PARSING */
     if (argc != 7)
     {
         fprintf(stdout, "Usage: %s <K> <C> <E> <T> <P> <S>\n", argv[0]);
@@ -305,13 +304,12 @@ int main(int argc, char *argv[])
     if (parseS(&S1, &S2) != 0)
         exit(EXIT_FAILURE);
 
-    // Setup signal handler 
+    // SIGQUIT and SIGHUP signals are treated by the director code 
     sigemptyset(&set);
     sigaddset(&set, SIGQUIT);
     sigaddset(&set, SIGHUP);
     pthread_sigmask(SIG_SETMASK, &set, NULL);
 
-    // Initialize variables
     if (pthread_mutex_init(&configAccess, NULL) != 0)
     {
         MOD_PERROR("pthread_mutex_init");
@@ -333,7 +331,6 @@ int main(int argc, char *argv[])
     gateClosed = true;
     pthread_mutex_unlock(&gateCustomers);
 
-    // Unlink socket file if already present
     ret = remove(SOCKET_FILENAME);
     if (ret == 0) {
         LOG_DEBUG("Socket file removed");
@@ -341,7 +338,7 @@ int main(int argc, char *argv[])
         LOG_DEBUG("Socket file does not exists");
     }   
 
-    /* CREATE SOCKET TO COMMUNICATE WITH SUPERMARKET PROCESS */
+    // Socket to communicate with supermarket thread
     sfd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
     if (sfd == -1)
     {
@@ -349,22 +346,20 @@ int main(int argc, char *argv[])
         goto error;
     }
 
-    // Build the address
     memset(&name, 0, sizeof(name));
     name.sun_family = AF_UNIX;
     strncpy(name.sun_path, SOCKET_FILENAME, sizeof(name.sun_path) - 1);
 
     LOG_DEBUG(name.sun_path);
 
-    // Keep alive to ensure no unlimited waiting on write/read
-    optval = 1; // enable option
+    // "Keep alive" to ensure no unlimited waiting on write/read
+    optval = 1;
     if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0)
     {
         MOD_PERROR("setsockopt");
         goto error;
     }
 
-    // Bind socket to socket name
     if (bind(sfd, (const struct sockaddr*)&name, sizeof(name)) == -1)
     {
         MOD_PERROR("bind");
@@ -373,14 +368,15 @@ int main(int argc, char *argv[])
 
     LOG_DEBUG("Ready to accept connections.");
 
-    // Prepare for accepting connection
     if (listen(sfd, 1) == -1)
     {
         MOD_PERROR("listen");
         goto error;
     }
 
-    // EXECUTE SUPERMARKET
+    /* Supermarket is a thread. No execve was used to launch
+     * it as a process to avoid memory duplication. The thread is not
+     * detached because director waits that it terminates. */ 
     ret = pthread_create(&thSu, NULL, SupermarketP, argv);
     if (ret != 0)
     {
@@ -388,15 +384,8 @@ int main(int argc, char *argv[])
         goto error;
     }
 
-    if (pthread_detach(thSu) != 0)
-    {
-        MOD_PERROR("pthread_detach");
-        goto error;
-    }
-
     LOG_DEBUG("Supermarket thread created.");
 
-    // Wait for connection
     csfd = accept(sfd, NULL, NULL);
     if (csfd == -1)
     {
@@ -406,10 +395,6 @@ int main(int argc, char *argv[])
 
     LOG_DEBUG("New connection arrived!");
 
-    /* Wait for a signal (BLOCKING) for 150 ms, repeatedly. If the timer runs out, 
-     * execute the director routine (look for parameters S1 and S2), otherwise, 
-     * if a signal is received, instruct the supermarket process to stop.  
-     * */
     wait_signal.tv_sec = 0;
     wait_signal.tv_nsec = 150 * 1000000; // 150 ms
     while (sigrecv != SIGHUP && sigrecv != SIGQUIT)
@@ -426,7 +411,8 @@ int main(int argc, char *argv[])
                 if (ret != 0)
                     goto error;
 
-                // Release waiting customers
+                /* Broadcast was used in place of signal to reduce the 
+                 * time required to release all the customers */
                 pthread_mutex_lock(&gateCustomers);
                 pthread_cond_broadcast(&exitCustomers);
                 pthread_mutex_unlock(&gateCustomers);
@@ -453,7 +439,6 @@ int main(int argc, char *argv[])
         LOG_DEBUG("Received signal SIGQUIT");
     }
 
-    // Send signal received to supermarket
     sprintf(msg, "%d", sigrecv);
     if (write(csfd, msg, sizeof(msg)) == -1)
     {
@@ -463,14 +448,10 @@ int main(int argc, char *argv[])
 
     LOG_DEBUG("Signal sent to supermarket");
 
-    pthread_mutex_lock(&gateCustomers);
-    pthread_cond_broadcast(&exitCustomers);
-    pthread_mutex_unlock(&gateCustomers);
-
-    // Wait that the supermarket closes
     while(true)
     {
-        // Error: the socket is closed, supermarket has been shut down
+        /* With the "KEEP_ALIVE" socket option we are able to ping the
+         * supermarket */
         ret = write(csfd, msg, sizeof(msg));
         if (ret == -1 && errno == EPIPE)
         {
@@ -483,8 +464,21 @@ int main(int argc, char *argv[])
             goto error;
         }
         else
+        {
+            /* Customers are released periodically to avoid the situation
+             * in which supermarket is waiting for stuck customers */
+            pthread_mutex_lock(&gateCustomers);
+            pthread_cond_broadcast(&exitCustomers);
+            pthread_mutex_unlock(&gateCustomers);
+
             sleep(1);
+        }
     }
+
+    /* The return values is not checked because supermarket 
+     * always returns 0 */
+    pthread_join(thSu, ret);
+    LOG_DEBUG("Supermarket returned successfully.")
 
     pthread_mutex_destroy(&gateCustomers);
     pthread_cond_destroy(&exitCustomers);
@@ -498,7 +492,6 @@ error:
 
     if (csfd != -1)
     {
-        // Close supermarket, sending a SIGQUIT to it
         LOG_DEBUG("Sending SIQUIT to Supermarket due to error.");
         sprintf(msg, "%d", SIGQUIT);
         if (write(csfd, msg, sizeof(msg)) == -1)
@@ -507,35 +500,43 @@ error:
         }
         else
         {
-            // Wait that the supermarket closes
             while (true)
             {
-                ret = write(csfd, msg, strlen(msg));
+                ret = write(csfd, msg, sizeof(msg));
                 if (ret == -1 && errno == EPIPE)
                 {
-                    MOD_PRINTF("Supermarket closed!");
+                    LOG_DEBUG("Supermarket closed!\n");
                     break;
                 }
                 else if (ret == -1)
                 {
                     MOD_PERROR("write");
-                    break;
+                    goto error;
                 }
                 else
+                {
+                    pthread_mutex_lock(&gateCustomers);
+                    pthread_cond_broadcast(&exitCustomers);
+                    pthread_mutex_unlock(&gateCustomers);
+
                     sleep(1);
+                }
             }
         }
         close(csfd);
     }
-    
+
+    pthread_join(thSu, ret);
+    LOG_DEBUG("Supermarket returned successfully.")
+
     pthread_mutex_destroy(&gateCustomers);
     pthread_cond_destroy(&exitCustomers);
     remove(SOCKET_FILENAME);
 
-    LOG_DEBUG("Director is exiting...");
-
     if (sfd != -1)
         close(sfd);
+
+    LOG_DEBUG("Director is exiting...");
     
     return -1;
 }
